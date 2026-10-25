@@ -9,8 +9,9 @@ programa
     : claseDecl EOF
     ;
 
+// 'public' es opcional en la clase (el enunciado de la fase 2 usa también 'class Impresora {').
 claseDecl
-    : PUBLIC CLASS ID '{' miembroClase* '}'
+    : PUBLIC? CLASS ID '{' miembroClase* '}'
     ;
 
 miembroClase
@@ -19,20 +20,29 @@ miembroClase
     | metodoDecl
     ;
 
-// String nombre;  int edad;
+// ENCAPSULAMIENTO (fase 2): modificador de acceso de atributos, constructores y métodos.
+// Sin modificador = 'default' (package-private). Solo se admite UN modificador por miembro.
+modificador
+    : PUBLIC
+    | PRIVATE
+    | PROTECTED
+    ;
+
+// private String nombre;   int edad;   (sin modificador = default)
 atributo
-    : tipo ID ';'
+    : modificador? tipo ID ';'
     ;
 
 // public Persona(String nombreParametro, int edadParametro) { ... }
 constructorDecl
-    : PUBLIC ID '(' parametros? ')' bloque
+    : modificador? ID '(' parametros? ')' bloque
     ;
 
 // public void saludar() { ... }
-// public int calcularAnioNacimiento(int anioActual) { ... }
+// private int calcularAnioNacimiento(int anioActual) { ... }
+// protected String obtenerNombre() { ... }
 metodoDecl
-    : PUBLIC (tipo | VOID) ID '(' parametros? ')' bloque
+    : modificador? (tipo | VOID) ID '(' parametros? ')' bloque
     ;
 
 parametros
@@ -102,7 +112,7 @@ asignacion
 
 // a++;  b--;
 incrementoDecremento
-    : ID ('++'|'--') ';'
+    : acceso ('++'|'--') ';'     // a++;   this.cuenta++;   v[i]--;
     ;
 
 // llamadas usadas como sentencia: println(...), readln();, obj.metodo(...);
@@ -146,7 +156,7 @@ forInit
     ;
 
 forUpdate
-    : ID ('++'|'--')           # forUpdateIncremento
+    : acceso ('++'|'--')       # forUpdateIncremento
     | acceso '=' expresion     # forUpdateAsignacion
     ;
 
@@ -212,7 +222,7 @@ expresionUnaria
 expresionPrimaria
     : '(' expresion ')'                              # exprParentesis
     | NEW ID '(' argumentos? ')'                      # exprNuevoObjeto
-    | NEW (INT|DOUBLE|CHAR|BOOLEAN) ('[' expresion ']')+ # exprNuevoArreglo
+    | NEW (INT|DOUBLE|CHAR|BOOLEAN|STRINGKEY|ID) ('[' expresion ']')+ # exprNuevoArreglo
     | acceso                                          # exprAcceso
     | literal                                         # exprLiteral
     ;
@@ -249,6 +259,8 @@ tipo
 // LEXER
 
 PUBLIC   : 'public';
+PRIVATE  : 'private';
+PROTECTED: 'protected';
 CLASS    : 'class';
 VOID     : 'void';
 NEW      : 'new';

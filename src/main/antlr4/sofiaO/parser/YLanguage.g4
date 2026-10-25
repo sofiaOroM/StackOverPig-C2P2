@@ -67,7 +67,7 @@ sentencia
     | interrupcion
     | retorno
     | llamadaFuncion
-    ) NL*
+    ) ';'? NL*      // el ';' final es opcional (el documento lo usa en 'contador++;' y 'continuar;')
     ;
 
 // ---------------- Declaraciones locales ----------------
@@ -120,7 +120,7 @@ acceso
 
 // contador++
 incremento
-    : ID ('++' | '--')
+    : acceso ('++' | '--')     // contador++   h.cantidad++   v[i]--
     ;
 
 // ---------------- Entrada/Salida ----------------
@@ -169,7 +169,7 @@ cicloWhile
 
 // hacer: ... mientras(...)
 cicloDo
-    : HACER ':'? NL* bloqueFuncion MIENTRAS '(' expresion ')'
+    : HACER ':'? NL* bloqueFuncion NL* MIENTRAS '(' expresion ')'
     ;
 
 // para(entero i = 0; i < 10; i++):
@@ -213,8 +213,10 @@ expresion
     | literal                                       # exprLiteral
     | expresion op=('*'|'/') expresion              # exprMultiplicativo
     | expresion op=('+'|'-') expresion              # exprAditivo
-    | expresion op=('=='|'!='|'<='|'>='|'<'|'>') expresion    # exprRelacional
-    | expresion op=('&&'|'||') expresion            # exprLogico
+    | expresion op=('<='|'>='|'<'|'>') expresion    # exprRelacional
+    | expresion op=('=='|'!=') expresion            # exprRelacional
+    | expresion op='&&' expresion                   # exprLogico
+    | expresion op='||' expresion                   # exprLogico
     ;
 
 literal

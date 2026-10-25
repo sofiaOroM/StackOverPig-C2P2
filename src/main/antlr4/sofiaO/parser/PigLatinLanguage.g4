@@ -37,6 +37,7 @@ seccionVariables
 declaracionGlobal
     : declaracionVariable
     | declaracionArreglo
+    | declaracionObjeto
     ;
 
 // MAIOR>
@@ -53,6 +54,7 @@ seccionPrincipal
 sentencia
     : declaracionVariable
     | declaracionArreglo
+    | declaracionObjeto
     | asignacion
     | incrementoDecremento
     | escritura
@@ -80,6 +82,15 @@ declaracionVariable
     : ESTO ID ':' VERUM ';'
     | ESTO ID ':' FALSUS ';'
     | ESTO ID ':' tipo valor? ';'
+    ;
+
+// Objetos (el tipo explícito al final es opcional; sin él se toma la clase instanciada):
+// esto miObjeto : novus Persona(12, "Profesor");
+// esto miObjeto : novus Profesor(12, "Prof") : Persona ;     (polimorfismo)
+// esto otroObjeto : null : Persona ;                          (las clases pueden ser nulas)
+declaracionObjeto
+    : ESTO ID ':' NOVUS ID '(' argumentos? ')' (':' tipo)? ';'
+    | ESTO ID ':' NULL ':' tipo ';'
     ;
 
 // series mis_enteros[2] : numerus {1, 1};
@@ -150,7 +161,7 @@ escritura
 // <<              (lee y descarta)
 // mi_textum <<    (lee y guarda en la variable)
 lectura
-    : ID? '<<' ';'
+    : ID? '<<' ';'?     // el ';' es opcional: los ejemplos del documento escriben  'nombre <<'  sin él
     ;
 
 // ---------------- Condicionales ----------------
@@ -201,10 +212,13 @@ expresion
     | NOVUS ID '(' argumentos? ')'                        # exprNuevoObjeto
     | acceso                                              # exprAcceso
     | literal                                             # exprLiteral
+    | op=('-'|'!') expresion                              # exprUnario
     | expresion op=('*'|'/') expresion                    # exprMultiplicativo
     | expresion op=('+'|'-') expresion                    # exprAditivo
-    | expresion op=('=='|'!='|'<'|'>'|'<='|'>=') expresion # exprRelacional
-    | expresion op=('&&'|'||') expresion                  # exprLogico
+    | expresion op=('<'|'>'|'<='|'>=') expresion          # exprRelacional
+    | expresion op=('=='|'!=') expresion                  # exprRelacional
+    | expresion op='&&' expresion                         # exprLogico
+    | expresion op='||' expresion                         # exprLogico
     ;
 
 literal
@@ -214,6 +228,7 @@ literal
     | CARACTER_LITERAL
     | VERUM
     | FALSUS
+    | NULL
     ;
 
 
@@ -239,6 +254,7 @@ INTERRUMPE : 'interrumpe';
 
 VERUM  : 'verum';
 FALSUS : 'falsus';
+NULL   : 'null';
 
 NUMERUSKEY   : 'numerus';
 TEXTUMKEY    : 'textum';
@@ -275,6 +291,8 @@ CARACTER_LITERAL : '\'' (~['\\] | '\\' .) '\'';
 // El documento solo muestra este estilo de comentario para Pig
 // Latin: dos '##' que abren y dos '##' que cierran un bloque.
 BLOCK_COMMENT : '##' .*? '##' -> skip;
+LINE_COMMENT  : '//' ~[\r\n]* -> skip;     // los archivos de prueba usan // y /* */ además de ##
+BLOCK_COMMENT2: '/*' .*? '*/' -> skip;
 WS            : [ \t\r\n]+ -> skip;
 
 //
