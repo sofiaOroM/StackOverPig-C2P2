@@ -48,4 +48,5 @@ public interface ASTVisitor<T> {
     T visit(PostfixExprNode n);
     T visit(NewObjectNode n);
     T visit(ArrayLiteralNode n);
+    T visit(NewArrayNode n);
 }

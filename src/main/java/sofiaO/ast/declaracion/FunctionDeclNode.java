@@ -15,6 +15,8 @@ public class FunctionDeclNode extends BaseNode implements Declaration {
     public List<Statement> cuerpo;
     public boolean esMetodo;
     public String claseDuena;    // nombre de la clase si esMetodo == true; null si no
+    /** Encapsulamiento del método (Zetariano). Las funciones libres (Y?) y los MAIOR> (Pig Latin) son PUBLIC. */
+    public Visibilidad visibilidad = Visibilidad.PUBLIC;
 
     public FunctionDeclNode(String nombre, List<ParamNode> parametros, String tipoRetorno,
                             List<Statement> cuerpo, boolean esMetodo, String claseDuena,
@@ -26,6 +28,25 @@ public class FunctionDeclNode extends BaseNode implements Declaration {
         this.cuerpo = cuerpo;
         this.esMetodo = esMetodo;
         this.claseDuena = claseDuena;
+    }
+
+    /**
+     * Nombre del método en el código generado. Distingue las sobrecargas y hace que un @Override
+     * (misma firma en la clase hija) tenga el mismo nombre que el método del padre:
+     *   saludar()               -> saludar
+     *   insertarFinal(int)      -> insertarFinal_int
+     *   insertarFinal(int,int)  -> insertarFinal_int_int
+     * Las funciones libres (Y?) conservan su nombre.
+     */
+    public String nombreCodigo() {
+        if (!esMetodo || parametros.isEmpty()) return nombre;
+        StringBuilder sb = new StringBuilder(nombre);
+        for (ParamNode p : parametros) {
+            String t = p.tipo.replace("[]", "Arr");
+            if (p.modo == ParamNode.ModoPaso.REFERENCIA_ARREGLO && !p.tipo.contains("[]")) t += "Arr";
+            sb.append('_').append(t);
+        }
+        return sb.toString();
     }
 
     @Override

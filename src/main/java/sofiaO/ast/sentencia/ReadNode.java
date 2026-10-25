@@ -12,6 +12,8 @@ import sofiaO.ast.Statement;
  */
 public class ReadNode extends BaseNode implements Statement, Expression {
     public String variableDestino; // null si no guarda el resultado ("leer()" / "<<" bare)
+    /** Tipo de la variable que recibe el valor en  'flotante v = leer()'; null si no se sabe (se lee como cadena). */
+    public sofiaO.util.Type tipoEsperado;
 
     public ReadNode(String variableDestino, int line, int column) {
         super(line, column);

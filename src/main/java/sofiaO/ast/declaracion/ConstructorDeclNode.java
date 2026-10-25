@@ -12,6 +12,8 @@ public class ConstructorDeclNode extends BaseNode implements Declaration {
     public String claseDuena;
     public List<ParamNode> parametros;
     public List<Statement> cuerpo;
+    /** Encapsulamiento del constructor: un constructor private solo puede invocarse desde su propia clase. */
+    public Visibilidad visibilidad = Visibilidad.PUBLIC;
 
     public ConstructorDeclNode(String claseDuena, List<ParamNode> parametros, List<Statement> cuerpo,
                                int line, int column) {

@@ -11,6 +11,8 @@ public class FieldNode extends BaseNode {
     public String tipo;
     public String nombre;
     public List<Integer> dimensionesArreglo; // vacío si no es arreglo (ej. miArray[10] -> [10])
+    /** Encapsulamiento (solo Zetariano). Los campos de estructuras Y? son siempre PUBLIC. */
+    public Visibilidad visibilidad = Visibilidad.PUBLIC;
 
     public FieldNode(String tipo, String nombre, List<Integer> dimensionesArreglo, int line, int column) {
         super(line, column);

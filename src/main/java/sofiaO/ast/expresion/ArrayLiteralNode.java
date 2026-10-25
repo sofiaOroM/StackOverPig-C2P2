@@ -9,6 +9,8 @@ import java.util.List;
 /** {10,20,30,40,50} / {"Hola","Adios"} / {"Valeria",25,{"Avenida Central",500}} (anidado, structs) */
 public class ArrayLiteralNode extends BaseNode implements Expression {
     public List<Expression> valores;
+    /** Si viene de 'new int[3][3]' con tamaños constantes: esas dimensiones (si es un literal {..}: null). */
+    public List<Integer> dimensionesNew;
 
     public ArrayLiteralNode(List<Expression> valores, int line, int column) {
         super(line, column);
