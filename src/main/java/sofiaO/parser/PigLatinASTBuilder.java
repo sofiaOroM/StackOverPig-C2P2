@@ -63,6 +63,7 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
     @Override
     public ASTNode visitDeclaracionGlobal(PigLatinLanguageParser.DeclaracionGlobalContext ctx) {
         if (ctx.declaracionVariable() != null) return visit(ctx.declaracionVariable());
+        if (ctx.declaracionObjeto() != null) return visit(ctx.declaracionObjeto());
         return visit(ctx.declaracionArreglo());
     }
 
@@ -87,6 +88,23 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
         String tipo = ctx.tipo().getText();
         ASTNode init = ctx.valor() != null ? visit(ctx.valor()) : null;
         return new VarDeclNode(tipo, nombre, null, init, line, column);
+    }
+
+    /** esto o : novus Persona(...) [: Persona] ;   |   esto o : null : Persona ; */
+    @Override
+    public ASTNode visitDeclaracionObjeto(PigLatinLanguageParser.DeclaracionObjetoContext ctx) {
+        int line = ctx.getStart().getLine();
+        int column = ctx.getStart().getCharPositionInLine();
+        String nombre = ctx.ID(0).getText();
+        if (ctx.NOVUS() != null) {
+            String clase = ctx.ID(1).getText();
+            List<Expression> argumentos = ctx.argumentos() != null
+                    ? convertirArgumentos(ctx.argumentos())
+                    : new ArrayList<>();
+            String tipo = ctx.tipo() != null ? ctx.tipo().getText() : clase;
+            return new VarDeclNode(tipo, nombre, null, new NewObjectNode(clase, argumentos, line, column), line, column);
+        }
+        return new VarDeclNode(ctx.tipo().getText(), nombre, null, new LiteralNode("null", line, column), line, column);
     }
 
     @Override
@@ -140,6 +158,7 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
     public ASTNode visitSentencia(PigLatinLanguageParser.SentenciaContext ctx) {
         if (ctx.declaracionVariable() != null) return visit(ctx.declaracionVariable());
         if (ctx.declaracionArreglo() != null) return visit(ctx.declaracionArreglo());
+        if (ctx.declaracionObjeto() != null) return visit(ctx.declaracionObjeto());
         if (ctx.asignacion() != null) return visit(ctx.asignacion());
         if (ctx.incrementoDecremento() != null) return visit(ctx.incrementoDecremento());
         if (ctx.escritura() != null) return visit(ctx.escritura());
@@ -344,6 +363,13 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
     @Override
     public ASTNode visitExprLiteral(PigLatinLanguageParser.ExprLiteralContext ctx) {
         return visit(ctx.literal());
+    }
+
+    /** -x  y  !x  (por ejemplo:  si (indice == -1) ). Reutiliza UnaryExprNode, igual que Zetariano. */
+    @Override
+    public ASTNode visitExprUnario(PigLatinLanguageParser.ExprUnarioContext ctx) {
+        return new UnaryExprNode(ctx.op.getText(), (Expression) visit(ctx.expresion()),
+                ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
 
     @Override

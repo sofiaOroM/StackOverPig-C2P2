@@ -274,10 +274,16 @@ public class YLanguageASTBuilder extends YLanguageBaseVisitor<ASTNode> {
 
     @Override
     public ASTNode visitIncremento(YLanguageParser.IncrementoContext ctx) {
-        String nombre = ctx.ID().getText();
+        int line = ctx.getStart().getLine();
+        int column = ctx.getStart().getCharPositionInLine();
         String operador = ctx.getChild(1).getText();
-        return new IncrDecrNode(nombre, operador,
-                ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+        Expression destino = (Expression) visit(ctx.acceso());
+        if (destino instanceof IdentifierNode id) return new IncrDecrNode(id.nombre, operador, line, column);
+        // h.cantidad++  /  v[i]--   ->   h.cantidad = h.cantidad + 1
+        Expression lectura = (Expression) visit(ctx.acceso());
+        String op = operador.equals("++") ? "+" : "-";
+        return new AssignNode(destino, "=",
+                new BinaryExprNode(op, lectura, new LiteralNode("1", line, column), line, column), line, column);
     }
 
     @Override

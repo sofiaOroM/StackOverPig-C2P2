@@ -55,8 +55,15 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         String textoTipo = ctx.tipo().getText();
         String tipoBase = tipoBaseSinCorchetes(textoTipo);
         List<Integer> dimensiones = dimensionesDesdeTipo(textoTipo);
-        return new FieldNode(tipoBase, ctx.ID().getText(), dimensiones,
+        FieldNode campo = new FieldNode(tipoBase, ctx.ID().getText(), dimensiones,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+        campo.visibilidad = visibilidadDe(ctx.modificador());
+        return campo;
+    }
+
+    /** Sin modificador -> DEFAULT (package-private). */
+    private static Visibilidad visibilidadDe(ZetarianoLanguageParser.ModificadorContext ctx) {
+        return Visibilidad.deTexto(ctx == null ? null : ctx.getText());
     }
 
     // constructorDecl/metodoDecl necesitan el nombre de la clase, que no
@@ -66,8 +73,10 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
                                                      String claseDuena) {
         List<ParamNode> parametros = ctx.parametros() != null ? convertirParametros(ctx.parametros()) : new ArrayList<>();
         List<Statement> cuerpo = convertirBloque(ctx.bloque());
-        return new ConstructorDeclNode(claseDuena, parametros, cuerpo,
+        ConstructorDeclNode ctor = new ConstructorDeclNode(claseDuena, parametros, cuerpo,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+        ctor.visibilidad = visibilidadDe(ctx.modificador());
+        return ctor;
     }
 
     private FunctionDeclNode construirMetodo(ZetarianoLanguageParser.MetodoDeclContext ctx, String claseDuena) {
@@ -75,8 +84,10 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         List<ParamNode> parametros = ctx.parametros() != null ? convertirParametros(ctx.parametros()) : new ArrayList<>();
         String tipoRetorno = ctx.VOID() != null ? null : ctx.tipo().getText();
         List<Statement> cuerpo = convertirBloque(ctx.bloque());
-        return new FunctionDeclNode(nombre, parametros, tipoRetorno, cuerpo, true, claseDuena,
+        FunctionDeclNode metodo = new FunctionDeclNode(nombre, parametros, tipoRetorno, cuerpo, true, claseDuena,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+        metodo.visibilidad = visibilidadDe(ctx.modificador());
+        return metodo;
     }
 
     private List<ParamNode> convertirParametros(ZetarianoLanguageParser.ParametrosContext ctx) {
@@ -209,14 +220,34 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
 
     @Override
     public ASTNode visitIncrementoDecremento(ZetarianoLanguageParser.IncrementoDecrementoContext ctx) {
-        String operador = ctx.getChild(1).getText();
-        return new IncrDecrNode(ctx.ID().getText(), operador,
+        return incrementoSobre(ctx.acceso(), ctx.getChild(1).getText(),
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+    }
+
+    /** a++ -> IncrDecrNode;  this.x++ / v[i]-- -> x = x + 1 (asignación equivalente). */
+    private ASTNode incrementoSobre(ZetarianoLanguageParser.AccesoContext acceso, String operador, int line, int column) {
+        Expression destino = (Expression) visit(acceso);
+        if (destino instanceof IdentifierNode id) return new IncrDecrNode(id.nombre, operador, line, column);
+        Expression lectura = (Expression) visit(acceso);
+        String op = operador.equals("++") ? "+" : "-";
+        return new AssignNode(destino, "=",
+                new BinaryExprNode(op, lectura, new LiteralNode("1", line, column), line, column), line, column);
     }
 
     @Override
     public ASTNode visitExpresionSentencia(ZetarianoLanguageParser.ExpresionSentenciaContext ctx) {
         Expression expr = (Expression) visit(ctx.expresion());
+        if (expr instanceof PostfixExprNode p) {
+            String especial = nombreEspecial(p);
+            if (especial != null && !especial.equals("readln")) {
+                // println(...) / print(...) / System.out.println(...) / System.out.print(...)
+                CallSuffix llamada = (CallSuffix) p.sufijos.get(p.sufijos.size() - 1);
+                PrintNode impresion = new PrintNode(new ArrayList<>(llamada.argumentos),
+                        ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+                impresion.saltoLinea = especial.equals("println");
+                return impresion;
+            }
+        }
         return new ExprStatementNode(expr,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
@@ -299,8 +330,7 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
 
     @Override
     public ASTNode visitForUpdateIncremento(ZetarianoLanguageParser.ForUpdateIncrementoContext ctx) {
-        String operador = ctx.getChild(1).getText();
-        return new IncrDecrNode(ctx.ID().getText(), operador,
+        return incrementoSobre(ctx.acceso(), ctx.getChild(1).getText(),
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
 
@@ -430,25 +460,12 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
 
     @Override
     public ASTNode visitExprNuevoArreglo(ZetarianoLanguageParser.ExprNuevoArregloContext ctx) {
-        // new int[5]  /  new int[3][3]
-        // No existe un "NewArrayNode" propio en el catálogo; se modela como
-        // un ArrayLiteralNode relleno de ceros del tamaño pedido (mismo
-        // criterio que usa QuadrupleGenerator para reservar espacio). Si el
-        // tamaño no es un literal constante, se reserva 0 (TODO: tamaño
-        // dinámico no soportado).
+        // new int[5]  /  new int[n]  /  new boolean[filas][columnas]
         int line = ctx.getStart().getLine();
         int column = ctx.getStart().getCharPositionInLine();
-        int tamanoTotal = 1;
-        for (var e : ctx.expresion()) {
-            try {
-                tamanoTotal *= Integer.parseInt(e.getText());
-            } catch (NumberFormatException ex) {
-                tamanoTotal = 0;
-            }
-        }
-        List<Expression> valoresVacios = new ArrayList<>();
-        for (int i = 0; i < tamanoTotal; i++) valoresVacios.add(new LiteralNode("0", line, column));
-        return new ArrayLiteralNode(valoresVacios, line, column);
+        List<Expression> dimensiones = new ArrayList<>();
+        for (var e : ctx.expresion()) dimensiones.add((Expression) visit(e));
+        return new NewArrayNode(ctx.getChild(1).getText(), dimensiones, line, column);
     }
 
     @Override
@@ -475,7 +492,30 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         for (var s : ctx.sufijo()) sufijos.add(convertirSufijo(s));
 
         if (sufijos.isEmpty()) return base;
-        return new PostfixExprNode(base, sufijos, line, column);
+        PostfixExprNode resultado = new PostfixExprNode(base, sufijos, line, column);
+        if ("readln".equals(nombreEspecial(resultado))) return new ReadNode(null, line, column);   // String s = readln();
+        return resultado;
+    }
+
+    /**
+     * Funciones del sistema de Zetariano (no se declaran): println(...), print(...), readln(),
+     * y las formas System.out.println(...) / System.out.print(...) que usa el documento.
+     * Devuelve "println", "print", "readln" o null si no es ninguna de ellas.
+     */
+    private static String nombreEspecial(PostfixExprNode p) {
+        if (!(p.base instanceof IdentifierNode id)) return null;
+        List<Suffix> s = p.sufijos;
+        if (s.isEmpty() || !(s.get(s.size() - 1) instanceof CallSuffix)) return null;
+        if (s.size() == 1 && (id.nombre.equals("println") || id.nombre.equals("print") || id.nombre.equals("readln"))) {
+            return id.nombre;
+        }
+        if (id.nombre.equals("System") && s.size() == 3
+                && s.get(0) instanceof FieldSuffix f0 && f0.nombreCampo.equals("out")
+                && s.get(1) instanceof FieldSuffix f1
+                && (f1.nombreCampo.equals("println") || f1.nombreCampo.equals("print"))) {
+            return f1.nombreCampo;
+        }
+        return null;
     }
 
     private Suffix convertirSufijo(ZetarianoLanguageParser.SufijoContext ctx) {
