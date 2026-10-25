@@ -12,6 +12,10 @@ public final class ResultadoCompilacion {
     /** Las cuartetas como texto, una instrucción por línea. */
     public String cuartetasTexto = "";
     public String codigoC = "";
+    /** Fase 2: ensamblador RISC-V (RARS) generado a partir de las cuartetas. */
+    public String codigoRiscV = "";
+    /** Fase 2: tabla de memoria (marcos de pila, objetos en el heap, vtables). */
+    public String reporteMemoria = "";
     /** Archivos que participaron (el principal y los importados), en el orden en que se procesaron. */
     public final List<Path> archivos = new ArrayList<>();
     /** Estructuras, clases y funciones encontradas. */
@@ -20,6 +24,8 @@ public final class ResultadoCompilacion {
     public boolean exitoso() { return errores.isEmpty(); }
 
     public boolean tieneCodigo() { return !codigoC.isEmpty(); }
+
+    public boolean tieneCodigoRiscV() { return !codigoRiscV.isEmpty(); }
 
     public long contar(ErrorCompilador.Tipo tipo) {
         return errores.stream().filter(e -> e.tipo == tipo).count();

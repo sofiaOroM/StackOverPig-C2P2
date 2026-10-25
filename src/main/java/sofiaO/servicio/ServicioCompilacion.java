@@ -4,6 +4,7 @@ import org.antlr.v4.runtime.*;
 import sofiaO.Traductor.CEmitter;
 import sofiaO.Traductor.Quadruple;
 import sofiaO.Traductor.QuadrupleGenerator;
+import sofiaO.Traductor.RiscVEmitter;
 import sofiaO.ast.Declaration;
 import sofiaO.ast.declaracion.ClassDeclNode;
 import sofiaO.ast.declaracion.ImportNode;
@@ -67,6 +68,7 @@ public class ServicioCompilacion {
         // 1. El programa principal debe ser válido léxica y sintácticamente antes de mirar sus imports.
         ProgramNode astPig = leerYParsear(archivoPig, Lenguaje.PIG, fuente, r.errores);
         if (astPig == null) return ordenar(r);
+        astPig.paquete = calcularPaquete(archivoPig, carpetaBase);
 
         // 2. Buscar y analizar cada archivo importado.
         List<ArchivoAnalizado> archivosY = new ArrayList<>();
@@ -89,6 +91,7 @@ public class ServicioCompilacion {
             r.archivos.add(resuelto);
             ProgramNode ast = leerYParsear(resuelto, lenguaje, fuente, r.errores);
             if (ast == null) continue;
+            ast.paquete = calcularPaquete(resuelto, carpetaBase);
             if (lenguaje == Lenguaje.ZETARIANO) validarNombreDeClase(resuelto, ast, r.errores);
             (lenguaje == Lenguaje.ZETARIANO ? archivosZ : archivosY).add(new ArchivoAnalizado(resuelto, lenguaje, ast));
         }
@@ -145,6 +148,7 @@ public class ServicioCompilacion {
 
         ProgramNode ast = leerYParsear(archivo, lenguaje.get(), fuente, r.errores);
         if (ast == null) return ordenar(r);
+        ast.paquete = calcularPaquete(archivo, raiz);
         if (lenguaje.get() == Lenguaje.ZETARIANO) validarNombreDeClase(archivo, ast, r.errores);
         if (!r.errores.isEmpty()) return ordenar(r);
 
@@ -191,6 +195,19 @@ public class ServicioCompilacion {
             emisor.setLayoutsEstructuras(compilador.contexto.obtenerLayoutsParaCEmitter());
             emisor.setDimensionesCamposEstructuras(compilador.contexto.obtenerDimensionesCamposParaCEmitter());
             r.codigoC = emisor.emitir(generador.cuartetas, generador.tiposDeLugares);
+
+            // Fase 2: la misma lista de cuartetas se traduce también a RISC-V (pila y heap explícitos).
+            try {
+                RiscVEmitter riscv = new RiscVEmitter();
+                riscv.tiposUsuarioDeLugares = generador.tiposUsuarioDeLugares;
+                riscv.setLayouts(compilador.contexto.layoutsEstructuras, compilador.contexto.layoutsClases);
+                riscv.setDimensionesCampos(compilador.contexto.obtenerDimensionesCamposParaCEmitter());
+                riscv.setSuperclases(compilador.contexto.superclases);
+                r.codigoRiscV = riscv.emitir(generador.cuartetas);
+                r.reporteMemoria = riscv.getReporteMemoria();
+            } catch (RuntimeException e) {
+                r.errores.add(errorInterno(e, archivoParaErrores));
+            }
 
             r.resumen.add("Estructuras: " + ordenados(compilador.contexto.structs.keySet()));
             r.resumen.add("Clases: " + ordenados(compilador.contexto.classes.keySet()));
@@ -327,6 +344,30 @@ public class ServicioCompilacion {
         String detalle = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
         return new ErrorCompilador(ErrorCompilador.Tipo.INTERNO,
                 "Error inesperado del compilador: " + detalle, archivo, 1, 0, 0);
+    }
+
+    // ---------------- paquetes (encapsulamiento) ----------------
+
+    /**
+     * El paquete de un archivo es su carpeta relativa a la carpeta de trabajo, con '.' como separador:
+     * raiz/modelo/Persona.z -> "modelo"; raiz/a/b/X.z -> "a.b"; un archivo en la raíz -> "" (paquete por
+     * defecto). Es el mismo criterio de los import (carpeta.Objeto1.z). Si no hay carpeta de trabajo o el
+     * archivo queda fuera de ella, se usa el paquete por defecto.
+     */
+    static String calcularPaquete(Path archivo, Path raiz) {
+        if (archivo == null || raiz == null) return "";
+        Path base = raiz.toAbsolutePath().normalize();
+        Path carpeta = archivo.toAbsolutePath().normalize().getParent();
+        if (carpeta == null || !carpeta.startsWith(base)) return "";
+        Path relativa = base.relativize(carpeta);
+        StringBuilder paquete = new StringBuilder();
+        for (Path parte : relativa) {
+            String nombre = parte.toString();
+            if (nombre.isEmpty()) continue;
+            if (paquete.length() > 0) paquete.append('.');
+            paquete.append(nombre);
+        }
+        return paquete.toString();
     }
 
     // ---------------- imports ----------------
