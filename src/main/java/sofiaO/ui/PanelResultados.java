@@ -27,7 +27,7 @@ import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-/** Panel inferior: errores, cuartetas y código C generado. */
+/** Panel inferior: errores, cuartetas, código C, código RISC-V y la tabla de memoria (pila y heap). */
 final class PanelResultados extends TabPane {
 
     /** Lo que el panel le pide a la ventana principal para guardar un resultado en disco. */
@@ -47,6 +47,8 @@ final class PanelResultados extends TabPane {
     private final Tab pestanaErrores = new Tab("Errores");
     private final Tab pestanaCuartetas = new Tab("Cuartetas");
     private final Tab pestanaC = new Tab("Código C");
+    private final Tab pestanaRiscV = new Tab("RISC-V");
+    private final Tab pestanaMemoria = new Tab("Memoria");
 
     private final Label resumenErrores = new Label();
     private final TableView<ErrorCompilador> tablaErrores = new TableView<>();
@@ -61,8 +63,14 @@ final class PanelResultados extends TabPane {
     private final CodeArea areaC = new CodeArea();
     private final SimpleBooleanProperty hayCodigo = new SimpleBooleanProperty(false);
 
+    private final CodeArea areaRiscV = new CodeArea();
+    private final CodeArea areaMemoria = new CodeArea();
+    private final SimpleBooleanProperty hayRiscV = new SimpleBooleanProperty(false);
+
     private String cuartetasTexto = "";
     private String codigoC = "";
+    private String codigoRiscV = "";
+    private String reporteMemoria = "";
     private String nombreBase = "programa";
 
     PanelResultados(IntegerProperty tamanoFuente, Guardador guardador, Ejecutor ejecutor) {
@@ -74,11 +82,14 @@ final class PanelResultados extends TabPane {
         configurarTablaErrores();
         configurarCuartetas(tamanoFuente);
         configurarCodigoC(tamanoFuente);
+        configurarRiscV(tamanoFuente);
 
         pestanaErrores.setContent(crearContenidoErrores());
         pestanaCuartetas.setContent(crearContenidoCuartetas());
         pestanaC.setContent(crearContenidoC());
-        getTabs().addAll(pestanaErrores, pestanaCuartetas, pestanaC);
+        pestanaRiscV.setContent(crearContenidoRiscV());
+        pestanaMemoria.setContent(crearContenidoMemoria());
+        getTabs().addAll(pestanaErrores, pestanaCuartetas, pestanaC, pestanaRiscV, pestanaMemoria);
 
         limpiar();
     }
@@ -90,6 +101,10 @@ final class PanelResultados extends TabPane {
     void seleccionarCuartetas() { getSelectionModel().select(pestanaCuartetas); }
 
     void seleccionarCodigoC() { getSelectionModel().select(pestanaC); }
+
+    void seleccionarRiscV() { getSelectionModel().select(pestanaRiscV); }
+
+    void seleccionarMemoria() { getSelectionModel().select(pestanaMemoria); }
 
     boolean estaEnErrores() { return getSelectionModel().getSelectedItem() == pestanaErrores; }
 
@@ -103,13 +118,19 @@ final class PanelResultados extends TabPane {
         tablaCuartetas.getItems().clear();
         cuartetasTexto = "";
         codigoC = "";
+        codigoRiscV = "";
+        reporteMemoria = "";
         hayCuartetas.set(false);
         hayCodigo.set(false);
+        hayRiscV.set(false);
         poner(textoCuartetas, "", ModoResaltado.C3D);
         poner(areaC, "", ModoResaltado.C);
+        poner(areaRiscV, "", ModoResaltado.RISCV);
+        poner(areaMemoria, "", ModoResaltado.NINGUNO);
         pestanaErrores.setText("Errores");
         pestanaCuartetas.setText("Cuartetas");
         pestanaC.setText("Código C");
+        pestanaRiscV.setText("RISC-V");
         resumenErrores.setText("Compila un archivo para ver aquí el resultado.");
         resumenErrores.getStyleClass().removeAll("resumen-ok", "resumen-error");
     }
@@ -142,6 +163,20 @@ final class PanelResultados extends TabPane {
         hayCodigo.set(r.tieneCodigo());
         poner(areaC, r.codigoC, ModoResaltado.C);
         pestanaC.setText("Código C");
+
+        // código RISC-V y memoria (fase 2)
+        codigoRiscV = r.codigoRiscV;
+        reporteMemoria = r.reporteMemoria;
+        hayRiscV.set(r.tieneCodigoRiscV());
+        poner(areaRiscV, r.codigoRiscV, ModoResaltado.RISCV);
+        poner(areaMemoria, r.reporteMemoria, ModoResaltado.NINGUNO);
+        pestanaRiscV.setText(r.tieneCodigoRiscV() ? "RISC-V (" + contarLineas(r.codigoRiscV) + " líneas)" : "RISC-V");
+    }
+
+    private static int contarLineas(String texto) {
+        int lineas = 1;
+        for (int i = 0; i < texto.length(); i++) if (texto.charAt(i) == '\n') lineas++;
+        return lineas;
     }
 
     private static String describirErrores(ResultadoCompilacion r) {
@@ -335,6 +370,72 @@ final class PanelResultados extends TabPane {
         vacio.visibleProperty().bind(hayCodigo.not());
 
         StackPane vistas = new StackPane(new VirtualizedScrollPane<>(areaC), vacio);
+        BorderPane contenido = new BorderPane(vistas);
+        contenido.setTop(barra);
+        return contenido;
+    }
+
+    // =====================================================================
+    // Código RISC-V y memoria (pila y heap)
+    // =====================================================================
+
+    private void configurarRiscV(IntegerProperty tamanoFuente) {
+        for (CodeArea area : List.of(areaRiscV, areaMemoria)) {
+            area.getStyleClass().add("editor");
+            area.setEditable(false);
+            area.styleProperty().bind(Bindings.concat("-fx-font-size: ", tamanoFuente.asString(), "px;"));
+        }
+    }
+
+    private Region crearContenidoRiscV() {
+        Label ayuda = new Label("Ábrelo en RARS (File > Open), luego Assemble y Run.");
+        ayuda.getStyleClass().add("vacio");
+
+        Button copiar = new Button("Copiar");
+        copiar.setOnAction(e -> copiar(codigoRiscV));
+        copiar.disableProperty().bind(hayRiscV.not());
+        Button guardar = new Button("Guardar como .asm…");
+        guardar.setOnAction(e -> guardador.guardar(nombreBase, "Código RISC-V", "asm", codigoRiscV));
+        guardar.disableProperty().bind(hayRiscV.not());
+
+        Region espacio = new Region();
+        HBox.setHgrow(espacio, Priority.ALWAYS);
+        HBox barra = new HBox(6, ayuda, espacio, copiar, guardar);
+        barra.setAlignment(Pos.CENTER_LEFT);
+        barra.getStyleClass().add("barra-panel");
+
+        Label vacio = new Label("El código RISC-V aparece cuando el programa compila sin errores.");
+        vacio.getStyleClass().add("vacio");
+        vacio.visibleProperty().bind(hayRiscV.not());
+
+        StackPane vistas = new StackPane(new VirtualizedScrollPane<>(areaRiscV), vacio);
+        BorderPane contenido = new BorderPane(vistas);
+        contenido.setTop(barra);
+        return contenido;
+    }
+
+    private Region crearContenidoMemoria() {
+        Label ayuda = new Label("Marcos de pila de cada función y disposición de objetos en el heap (con sus vtables).");
+        ayuda.getStyleClass().add("vacio");
+
+        Button copiar = new Button("Copiar");
+        copiar.setOnAction(e -> copiar(reporteMemoria));
+        copiar.disableProperty().bind(hayRiscV.not());
+        Button guardar = new Button("Guardar…");
+        guardar.setOnAction(e -> guardador.guardar(nombreBase + "_memoria", "Tabla de memoria", "txt", reporteMemoria));
+        guardar.disableProperty().bind(hayRiscV.not());
+
+        Region espacio = new Region();
+        HBox.setHgrow(espacio, Priority.ALWAYS);
+        HBox barra = new HBox(6, ayuda, espacio, copiar, guardar);
+        barra.setAlignment(Pos.CENTER_LEFT);
+        barra.getStyleClass().add("barra-panel");
+
+        Label vacio = new Label("La tabla de memoria aparece cuando el programa compila sin errores.");
+        vacio.getStyleClass().add("vacio");
+        vacio.visibleProperty().bind(hayRiscV.not());
+
+        StackPane vistas = new StackPane(new VirtualizedScrollPane<>(areaMemoria), vacio);
         BorderPane contenido = new BorderPane(vistas);
         contenido.setTop(barra);
         return contenido;

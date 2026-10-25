@@ -164,6 +164,8 @@ final class VentanaPrincipal implements PanelArbol.Acciones {
                 item("Errores", null, resultados::seleccionarErrores),
                 item("Cuartetas", null, resultados::seleccionarCuartetas),
                 item("Código C", null, resultados::seleccionarCodigoC),
+                item("Código RISC-V", null, resultados::seleccionarRiscV),
+                item("Memoria (pila y heap)", null, resultados::seleccionarMemoria),
                 new SeparatorMenuItem(),
                 item("Aumentar letra", combinacion(KeyCode.EQUALS, false), () -> cambiarFuente(1)),
                 item("Reducir letra", combinacion(KeyCode.MINUS, false), () -> cambiarFuente(-1)),
