@@ -23,6 +23,8 @@ public final class ResaltadorSintaxis {
         List<Segmento> salida = new ArrayList<>();
         if (texto == null || texto.isEmpty() || modo == ModoResaltado.NINGUNO) return salida;
 
+        if (modo == ModoResaltado.RISCV) return ResaltadorRiscV.resaltar(texto);
+
         ModoResaltado.Reglas reglas = modo.reglas;
         int n = texto.length();
         int i = 0;

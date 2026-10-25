@@ -21,7 +21,7 @@ public enum ModoResaltado {
             "//", "/*", "*/", false, true)),
 
     ZETARIANO(new Reglas(
-            Set.of("public", "class", "void", "new", "if", "else", "switch", "case", "default", "for",
+            Set.of("public", "private", "protected", "class", "void", "new", "if", "else", "switch", "case", "default", "for",
                     "while", "do", "break", "continue", "return"),
             Set.of("int", "double", "char", "boolean", "String"),
             Set.of("true", "false", "null"),
@@ -44,6 +44,9 @@ public enum ModoResaltado {
             Set.of("NULL"),
             Set.of(), List.of(),
             "//", "/*", "*/", true, false)),
+
+    /** Ensamblador RISC-V generado (lo colorea ResaltadorRiscV). */
+    RISCV(new Reglas(Set.of(), Set.of(), Set.of(), Set.of(), List.of(), "#", null, null, false, false)),
 
     /** Cuartetas (código de tres direcciones) en su forma de texto. */
     C3D(new Reglas(
