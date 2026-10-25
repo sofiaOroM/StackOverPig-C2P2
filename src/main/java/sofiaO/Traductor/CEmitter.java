@@ -59,6 +59,17 @@ public class CEmitter {
         salida.append("#include <stdio.h>\n");
         salida.append("#include <stdlib.h>\n");
         salida.append("#include <string.h>\n\n");
+        salida.append("""
+/* Arreglos: llevan un encabezado de 32 bytes ANTES de los datos con rank, total y dimensiones
+   (datos[-1]=rank, datos[-2]=total, datos[-3]=d0, datos[-4]=d1, datos[-5]=d2). Gracias a eso a[i][j]
+   funciona aunque el tamano se conozca solo en tiempo de ejecucion: new int[filas][columnas]. */
+static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) {
+    int* datos = (int*) ((char*) calloc(1, 32 + (size_t) (total > 0 ? total : 0) * elem) + 32);
+    datos[-1] = rank; datos[-2] = total; datos[-3] = d0; datos[-4] = d1; datos[-5] = d2;
+    return datos;
+}
+
+""");
 
         if (usaCadenas(cuartetas)) emitirRuntimeCadenas();
 
@@ -383,17 +394,40 @@ public class CEmitter {
 
             case "newarray": {
                 String tipoUsrArreglo = tiposUsuarioDeLugares.get(q.result);
-                if (tipoUsrArreglo != null && layoutsEstructuras.containsKey(tipoUsrArreglo)) {
-                    return "    " + q.result + " = (" + tipoUsrArreglo + "*) malloc(" + q.arg1
-                            + " * sizeof(" + tipoUsrArreglo + "));\n";
-                }
-                String tipoPuntero = tipoPunteroArreglo(q.tipoResultado);
-                String tipoElemento = tipoElementoArreglo(q.tipoResultado);
-                return "    " + q.result + " = (" + tipoPuntero + ") malloc(" + q.arg1
-                        + " * sizeof(" + tipoElemento + "));\n";
+                boolean deEstructura = tipoUsrArreglo != null && layoutsEstructuras.containsKey(tipoUsrArreglo);
+                String tipoPuntero = deEstructura ? tipoUsrArreglo + "*" : tipoPunteroArreglo(q.tipoResultado);
+                String tipoElemento = deEstructura ? tipoUsrArreglo : tipoElementoArreglo(q.tipoResultado);
+                List<String> dimsTexto = new ArrayList<>();
+                for (String d : q.extraArgs) dimsTexto.add(resolverAtributo(d, funcionActual));
+                if (dimsTexto.isEmpty()) dimsTexto.add(resolverAtributo(q.arg1, funcionActual));
+                return "    " + q.result + " = (" + tipoPuntero + ") "
+                        + llamadaNewArr(tipoElemento, resolverAtributo(q.arg1, funcionActual), dimsTexto) + ";\n";
             }
-            case "new":
-                return "    " + q.result + " = (" + q.arg1 + "*) malloc(sizeof(" + q.arg1 + "));\n";
+            case "arraydim":    // tamaño de la dimensión k, guardado en el encabezado del arreglo
+                return "    " + q.result + " = ((int*) " + resolverAtributo(q.arg1, funcionActual) + ")[-3 - " + q.arg2 + "];\n";
+            case "new": {
+                StringBuilder nuevo = new StringBuilder("    " + q.result + " = (" + q.arg1 + "*) malloc(sizeof(" + q.arg1 + "));\n");
+                // Arreglos de tamaño fijo dentro del objeto/estructura: se reservan al crearlo
+                // (los arreglos de estructuras los inicializa el generador).
+                Map<String, ResolvedType> camposNew = layoutsEstructuras.get(q.arg1);
+                Map<String, List<Integer>> dimsNew = dimensionesCamposEstructuras.get(q.arg1);
+                if (camposNew != null && dimsNew != null) {
+                    for (var campo : camposNew.entrySet()) {
+                        List<Integer> dims = dimsNew.get(campo.getKey());
+                        if (dims == null || dims.isEmpty() || campo.getValue().tipo() == Type.ESTRUCTURA) continue;
+                        long total = 1;
+                        for (int d : dims) total *= Math.max(d, 0);
+                        if (total <= 0) continue;
+                        List<String> dimsCampo = new ArrayList<>();
+                        for (int d : dims) dimsCampo.add(String.valueOf(Math.max(d, 0)));
+                        nuevo.append("    ").append(q.result).append("->").append(campo.getKey()).append(" = (")
+                                .append(tipoPunteroArreglo(campo.getValue().tipo())).append(") ")
+                                .append(llamadaNewArr(tipoElementoArreglo(campo.getValue().tipo()), String.valueOf(total), dimsCampo))
+                                .append(";\n");
+                    }
+                }
+                return nuevo.toString();
+            }
 
             default:
                 String izq = resolverAtributo(q.arg1, funcionActual);
@@ -489,6 +523,13 @@ public class CEmitter {
         return "    scanf(\"%lf\", &" + q.result + ");\n";
     }
 
+    /** __newarr(sizeof(T), total, rank, d0, d1, d2) */
+    private static String llamadaNewArr(String tipoElemento, String total, List<String> dims) {
+        StringBuilder sb = new StringBuilder("__newarr(sizeof(" + tipoElemento + "), " + total + ", " + dims.size());
+        for (int k = 0; k < 3; k++) sb.append(", ").append(k < dims.size() ? dims.get(k) : "0");
+        return sb.append(")").toString();
+    }
+
     private String traducirPrint(Quadruple q) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < q.extraArgs.size(); i++) {
@@ -501,7 +542,7 @@ public class CEmitter {
             sb.append("    printf(\"").append(tipo.formatoPrintf()).append("\", ")
                     .append(arg).append(");\n");
         }
-        sb.append("    printf(\"\\n\");\n");
+        if (!"sin_salto".equals(q.arg1)) sb.append("    printf(\"\\n\");\n");
         return sb.toString();
     }
 }
