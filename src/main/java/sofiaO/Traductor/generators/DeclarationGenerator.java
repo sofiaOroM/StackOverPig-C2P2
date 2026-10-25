@@ -57,6 +57,7 @@ public class DeclarationGenerator {
         for (var atributo : n.atributos) nombresAtributos.add(atributo.nombre);
         Set<String> nombresMetodos = new HashSet<>();
         for (var m : n.metodos) nombresMetodos.add(m.nombre);
+        agregarHeredados(n.nombre, nombresAtributos, nombresMetodos);
 
         ctx.enterClass(n.nombre, nombresAtributos, nombresMetodos);
         if (n.constructores.isEmpty()) {
@@ -66,6 +67,18 @@ public class DeclarationGenerator {
         for (var m : n.metodos) ctx.generate(m);
         ctx.exitClass();
         return null;
+    }
+
+    /** Atributos y métodos de las superclases también se acceden sin 'this.' dentro de la clase hija. */
+    private void agregarHeredados(String clase, Set<String> atributos, Set<String> metodos) {
+        if (ctx.context() == null) return;
+        int guarda = 0;
+        for (String c = ctx.context().superclases.get(clase); c != null && guarda++ < 100; c = ctx.context().superclases.get(c)) {
+            var layout = ctx.context().layoutsClases.get(c);
+            if (layout != null) atributos.addAll(layout.keySet());
+            var porNombre = ctx.context().sobrecargasPorClase.get(c);
+            if (porNombre != null) metodos.addAll(porNombre.keySet());
+        }
     }
 
     private void generarConstructorPorDefecto(String claseDuena) {
@@ -79,7 +92,7 @@ public class DeclarationGenerator {
     }
 
     public String visit(FunctionDeclNode n) {
-        String nombreCompleto = n.esMetodo ? n.claseDuena + "_" + n.nombre : n.nombre;
+        String nombreCompleto = n.esMetodo ? n.claseDuena + "_" + n.nombreCodigo() : n.nombre;
         // arg1 = tipo de retorno declarado (null = void); lo usa CEmitter para la firma en C
         ctx.emit("func", n.tipoRetorno, null, nombreCompleto, Type.VOID);
 
@@ -133,12 +146,14 @@ public class DeclarationGenerator {
         if (!n.dimensionesArreglo.isEmpty()) {
             ctx.arrayDimensions().put(n.nombre, n.dimensionesArreglo);
             int total = 1;
-            for (int d : n.dimensionesArreglo) total *= d;
-            ctx.emit("declare", String.valueOf(total), null, n.nombre, tipo);
-            if (n.inicializador == null) {
+            for (int d : n.dimensionesArreglo) total *= Math.max(d, 0);
+            ctx.emit("declare", String.valueOf(total), tipoUsuarioDeclarado(n, tipo), n.nombre, tipo);
+            boolean tamanosConstantes = n.dimensionesArreglo.stream().allMatch(d -> d >= 0);
+            if (n.inicializador == null && tamanosConstantes) {
                 String tipoUsr = ctx.placeUserTypes().get(n.nombre);
                 String temp = ctx.newTempOf(tipo, tipoUsr);
-                ctx.emit("newarray", String.valueOf(total), null, temp, tipo);
+                ctx.emitVariadic("newarray", String.valueOf(total), temp, tipo, dimensionesComoTexto(n.dimensionesArreglo),
+                        java.util.Collections.nCopies(n.dimensionesArreglo.size(), Type.ENTERO));
                 ctx.emit("=", temp, null, n.nombre, tipo);
 
                 if (tipo == Type.ESTRUCTURA) {
@@ -150,7 +165,7 @@ public class DeclarationGenerator {
                 }
             }
         } else {
-            ctx.emit("declare", null, null, n.nombre, tipo);
+            ctx.emit("declare", null, tipoUsuarioDeclarado(n, tipo), n.nombre, tipo);
         }
 
         if (n.inicializador != null) {
@@ -162,6 +177,17 @@ public class DeclarationGenerator {
             inicializarCamposEstructura(n.nombre, tipoUsr);
         }
         return null;
+    }
+
+    /** arg2 de 'declare': nombre del tipo de usuario (estructura/clase) o null. Lo usa el backend RISC-V. */
+    private static String tipoUsuarioDeclarado(VarDeclNode n, Type tipo) {
+        return (tipo == Type.ESTRUCTURA || tipo == Type.CLASE) ? n.tipo : null;
+    }
+
+    private static List<String> dimensionesComoTexto(List<Integer> dims) {
+        List<String> texto = new java.util.ArrayList<>();
+        for (int d : dims) texto.add(String.valueOf(d));
+        return texto;
     }
 
     static String nombreInitPara(String clase, int cantidadParametros) {
@@ -184,7 +210,8 @@ public class DeclarationGenerator {
                 int total = 1;
                 for (int d : dimensionesCampo) total *= d;
                 String arreglo = ctx.newTempOf(campo.getValue().tipo(), tipoCampo);
-                ctx.emit("newarray", String.valueOf(total), null, arreglo, Type.ESTRUCTURA);
+                ctx.emitVariadic("newarray", String.valueOf(total), arreglo, Type.ESTRUCTURA, dimensionesComoTexto(dimensionesCampo),
+                        java.util.Collections.nCopies(dimensionesCampo.size(), Type.ENTERO));
                 ctx.emit("setfield", lugar, nombreCampo, arreglo, Type.ESTRUCTURA);
                 for (int idx = 0; idx < total; idx++) {
                     String elemento = ctx.newTempOf(Type.ESTRUCTURA, tipoCampo);

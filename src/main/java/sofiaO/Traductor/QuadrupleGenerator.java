@@ -85,6 +85,7 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
     @Override public String visit(PostfixExprNode n)    { return expressions.visit(n); }
     @Override public String visit(NewObjectNode n)      { return expressions.visit(n); }
     @Override public String visit(ArrayLiteralNode n)   { return expressions.visit(n); }
+    @Override public String visit(NewArrayNode n)       { return expressions.visit(n); }
 
     //  GeneratorContext: el estado real vive aquí; los colaboradores solo lo piden.
 
@@ -114,8 +115,10 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
 
     @Override
     public String newTempOf(Type tipo, String tipoUsr) {
-        String t = newTemp(tipo);
+        String t = "t" + (contadorTemp++);
+        tiposDeLugares.put(t, tipo == null ? Type.ERROR : tipo);
         if (tipoUsr != null) tiposUsuarioDeLugares.put(t, tipoUsr);
+        emit("declare", null, tipoUsr, t, tipo);   // arg2 = tipo de usuario (lo usa el backend RISC-V)
         return t;
     }
 
@@ -192,18 +195,24 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
     }
 
     @Override
-    public String flattenIndices(String nombreArreglo, List<String> indices) {
+    public String flattenIndices(String nombreArreglo, String direccionArreglo, List<String> indices) {
         if (indices.size() == 1) return indices.get(0);
 
-        List<Integer> dims = dimensionesArreglos.get(nombreArreglo);
-        if (dims == null || dims.size() < indices.size()) {
-            return indices.get(0);
-        }
+        List<Integer> dims = nombreArreglo == null ? null : dimensionesArreglos.get(nombreArreglo);
+        boolean constantes = dims != null && dims.size() >= indices.size() && dims.stream().allMatch(d -> d >= 0);
 
         String acumulado = indices.get(0);
         for (int i = 1; i < indices.size(); i++) {
+            String dimension;
+            if (constantes) {
+                dimension = String.valueOf(dims.get(i));
+            } else {
+                // El tamaño se conoce solo al ejecutar: está en el encabezado del arreglo (heap).
+                dimension = newTemp(Type.ENTERO);
+                emit("arraydim", direccionArreglo, String.valueOf(i), dimension, Type.ENTERO);
+            }
             String tempMultiplicacion = newTemp(Type.ENTERO);
-            emit("*", acumulado, String.valueOf(dims.get(i)), tempMultiplicacion, Type.ENTERO);
+            emit("*", acumulado, dimension, tempMultiplicacion, Type.ENTERO);
 
             String tempSuma = newTemp(Type.ENTERO);
             emit("+", tempMultiplicacion, indices.get(i), tempSuma, Type.ENTERO);

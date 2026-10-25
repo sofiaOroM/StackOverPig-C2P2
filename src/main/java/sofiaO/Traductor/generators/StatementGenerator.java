@@ -71,7 +71,7 @@ public class StatementGenerator {
                     for (int k = 0; k < indicesSeguidos; k++) {
                         indices.add(ctx.generate(((IndexSuffix) sufijos.get(i + k)).indice));
                     }
-                    String indiceFinal = ctx.flattenIndices(nombreBase, indices);
+                    String indiceFinal = ctx.flattenIndices(nombreBase, direccionBase, indices);
 
                     if (i + indicesSeguidos >= sufijos.size()) {
                         ctx.emit("setindex", direccionBase, indiceFinal, valor, ctx.typeOfPlace(direccionBase));
@@ -265,7 +265,8 @@ public class StatementGenerator {
             direcciones.add(lugar);
             tipos.add(ctx.typeOfOperand(arg, lugar));
         }
-        ctx.emitVariadic("print", null, null, Type.VOID, direcciones, tipos);
+        // arg1 = "sin_salto" cuando es print(...) sin salto de línea
+        ctx.emitVariadic("print", n.saltoLinea ? null : "sin_salto", null, Type.VOID, direcciones, tipos);
         return null;
     }
 

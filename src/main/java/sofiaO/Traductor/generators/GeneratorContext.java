@@ -46,7 +46,8 @@ public interface GeneratorContext {
     // ---- Arreglos ----
     Map<String, List<Integer>> arrayDimensions();
     int countConsecutiveIndices(List<Suffix> suffixes, int from);
-    String flattenIndices(String arrayName, List<String> indices);
+    /** @param arrayPlace lugar donde vive el arreglo (para leer sus dimensiones del encabezado en el heap). */
+    String flattenIndices(String arrayName, String arrayPlace, List<String> indices);
 
     // ---- Concatenación de cadenas ('+' cuando el resultado es CADENA) ----
     /** Tipo real de un operando ya generado (usa el del AST, y si no, el del lugar). */

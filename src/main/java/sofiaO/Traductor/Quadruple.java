@@ -78,7 +78,9 @@ public class Quadruple {
             case "param":    return "param " + arg1;
             case "new":      return result + " = new " + arg1
                     + (extraArgs.isEmpty() ? "" : ", " + String.join(", ", extraArgs));
-            case "newarray": return result + " = newarray " + arg1;
+            case "newarray": return result + " = newarray " + arg1
+                    + (extraArgs.isEmpty() ? "" : " dims=" + extraArgs);
+            case "arraydim": return result + " = arraydim " + arg1 + "[" + arg2 + "]";
             case "getfield": return result + " = " + arg1 + "->" + arg2;
             case "setfield": return arg1 + "->" + arg2 + " = " + result;
             case "getindex": return result + " = " + arg1 + "[" + arg2 + "]";

@@ -130,7 +130,7 @@ public class ExpressionGenerator {
 
         Type tipoRetorno = tipoFallback;
         String tipoUsrRetorno = null;
-        FunctionDeclNode m = ctx.findMethod(clase, metodo);
+        FunctionDeclNode m = cs.metodoResuelto != null ? cs.metodoResuelto : ctx.findMethod(clase, metodo);
         if (m != null) {
             ResolvedType rt = ctx.resolveTypeText(m.tipoRetorno);
             tipoRetorno = rt.tipo();
@@ -138,7 +138,7 @@ public class ExpressionGenerator {
         }
 
         String temp = ctx.newTempOf(tipoRetorno, tipoUsrRetorno);
-        String nombreFuncion = clase != null ? clase + "_" + metodo : metodo;
+        String nombreFuncion = clase != null ? clase + "_" + (m != null ? m.nombreCodigo() : metodo) : metodo;
         ctx.emitVariadic("call", nombreFuncion, temp, tipoRetorno, args, tipos);
         return new Step(temp, tipoUsrRetorno);
     }
@@ -176,7 +176,7 @@ public class ExpressionGenerator {
                 for (int k = 0; k < indicesSeguidos; k++) {
                     indices.add(ctx.generate(((IndexSuffix) n.sufijos.get(i + k)).indice));
                 }
-                String indiceFinal = ctx.flattenIndices(nombreBase, indices);
+                String indiceFinal = ctx.flattenIndices(nombreBase, direccion, indices);
                 Type tipoElemento = ctx.typeOfPlace(direccion);
                 String temp = ctx.newTempOf(tipoElemento, tipoUsr);
                 ctx.emit("getindex", direccion, indiceFinal, temp, tipoElemento);
@@ -265,6 +265,22 @@ public class ExpressionGenerator {
         return temp;
     }
 
+    /** new int[n] / new boolean[f][c]: total = producto de los tamaños; las dimensiones viajan en la cuarteta. */
+    public String visit(NewArrayNode n) {
+        Type tipo = n.tipoResuelto;
+        List<String> dims = new ArrayList<>();
+        for (Expression d : n.dimensiones) dims.add(ctx.generate(d));
+        String total = dims.get(0);
+        for (int i = 1; i < dims.size(); i++) {
+            String producto = ctx.newTemp(Type.ENTERO);
+            ctx.emit("*", total, dims.get(i), producto, Type.ENTERO);
+            total = producto;
+        }
+        String temp = ctx.newTempOf(tipo, n.tipoUsuarioResuelto);
+        ctx.emitVariadic("newarray", total, temp, tipo, dims, java.util.Collections.nCopies(dims.size(), Type.ENTERO));
+        return temp;
+    }
+
     public String visit(ArrayLiteralNode n) {
         if (n.tipoResuelto == Type.ESTRUCTURA) {
             return generarLiteralEstructura(n);
@@ -274,12 +290,27 @@ public class ExpressionGenerator {
         aplanarValores(n, valoresPlanos);
 
         String temp = ctx.newTemp(tipo);
-        ctx.emit("newarray", String.valueOf(valoresPlanos.size()), null, temp, tipo);
+        List<String> dimsLiteral = new ArrayList<>();
+        for (int d : dimensionesDeLiteral(n)) dimsLiteral.add(String.valueOf(d));
+        ctx.emitVariadic("newarray", String.valueOf(valoresPlanos.size()), temp, tipo, dimsLiteral,
+                java.util.Collections.nCopies(dimsLiteral.size(), Type.ENTERO));
         for (int i = 0; i < valoresPlanos.size(); i++) {
             String valor = ctx.generate(valoresPlanos.get(i));
             ctx.emit("setindex", temp, String.valueOf(i), valor, tipo);
         }
         return temp;
+    }
+
+    /** {{1,2,3},{4,5,6}} -> [2, 3] */
+    private List<Integer> dimensionesDeLiteral(ArrayLiteralNode n) {
+        List<Integer> dims = new ArrayList<>();
+        ArrayLiteralNode actual = n;
+        while (actual != null) {
+            dims.add(actual.valores.size());
+            actual = (!actual.valores.isEmpty() && actual.valores.get(0) instanceof ArrayLiteralNode a
+                    && a.tipoResuelto != Type.ESTRUCTURA) ? a : null;
+        }
+        return dims;
     }
 
     /**
