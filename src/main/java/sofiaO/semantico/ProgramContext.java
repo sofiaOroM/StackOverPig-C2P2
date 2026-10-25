@@ -37,6 +37,15 @@ public class ProgramContext {
     /** nombreClase -> (nombreMetodo -> declaración del método) */
     public final Map<String, Map<String, FunctionDeclNode>> metodosPorClase = new HashMap<>();
 
+    /** nombreClase -> (nombreMetodo -> TODAS las sobrecargas de ese nombre) */
+    public final Map<String, Map<String, List<FunctionDeclNode>>> sobrecargasPorClase = new HashMap<>();
+
+    /** nombreClase -> paquete donde está declarada (carpeta relativa, "" = paquete por defecto). Encapsulamiento. */
+    public final Map<String, String> paquetesPorClase = new HashMap<>();
+
+    /** clase hija -> clase padre (herencia, fase 2). Vacío hasta que el semántico registre los 'extends'. */
+    public final Map<String, String> superclases = new HashMap<>();
+
     /** nombreClase -> lista de constructores (puede haber varios por sobrecarga) */
     public final Map<String, List<ConstructorDeclNode>> constructoresPorClase = new HashMap<>();
 

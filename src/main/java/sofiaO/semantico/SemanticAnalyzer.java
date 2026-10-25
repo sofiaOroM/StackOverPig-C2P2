@@ -28,6 +28,8 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
     private ResolvedType tipoRetornoFuncionActual = null;
     private int profundidadCiclo = 0;
     private String claseActual = null;
+    /** Paquete del archivo que se está analizando ("" = por defecto). Lo usa el encapsulamiento. */
+    private String paqueteActual = "";
 
     private final List<SemanticException> errores = new ArrayList<>();
     private static final Pattern LINEA_EN_MENSAJE = Pattern.compile("\\(línea (\\d+)\\)");
@@ -151,6 +153,64 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         }
     }
 
+    /** ¿La clase (o alguna de sus superclases) tiene un método con ese nombre? */
+    private boolean tieneMetodo(String clase, String nombre) {
+        int guarda = 0;
+        for (String c = clase; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
+            var porNombre = contexto.sobrecargasPorClase.get(c);
+            if (porNombre != null && porNombre.containsKey(nombre)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Elige la sobrecarga de 'nombre' que corresponde a los argumentos de la llamada, buscando primero en
+     * la clase y luego en sus superclases. Deja la elegida en call.metodoResuelto para el generador.
+     * Devuelve null si ninguna clase de la cadena tiene un método con ese nombre.
+     */
+    private FunctionDeclNode resolverMetodo(String clase, String nombre, CallSuffix call, int linea) {
+        List<FunctionDeclNode> candidatos = new ArrayList<>();
+        int guarda = 0;
+        for (String c = clase; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
+            var porNombre = contexto.sobrecargasPorClase.get(c);
+            if (porNombre != null && porNombre.containsKey(nombre)) candidatos.addAll(porNombre.get(nombre));
+        }
+        if (candidatos.isEmpty()) return null;
+
+        FunctionDeclNode elegido = candidatos.get(0);
+        if (candidatos.size() > 1) {
+            List<Type> tipos = new ArrayList<>();
+            List<String> tiposUsr = new ArrayList<>();
+            for (Expression a : call.argumentos) { tipos.add(a.accept(this)); tiposUsr.add(tipoUsuarioDe(a)); }
+            FunctionDeclNode coincidente = null;
+            for (FunctionDeclNode c : candidatos) {          // 1.º firma exacta, 2.º firma compatible
+                if (coincideExacta(c.parametros, tipos, tiposUsr, linea)) { coincidente = c; break; }
+            }
+            if (coincidente == null) {
+                for (FunctionDeclNode c : candidatos) {
+                    if (coincideFirma(c.parametros, tipos, tiposUsr, linea)) { coincidente = c; break; }
+                }
+            }
+            if (coincidente == null) {
+                throw new SemanticException("Ningún método '" + nombre + "' de '" + clase + "' coincide con los "
+                        + tipos.size() + " argumento(s) dado(s) (línea " + linea + ")");
+            }
+            elegido = coincidente;
+        }
+        call.metodoResuelto = elegido;
+        return elegido;
+    }
+
+    private boolean coincideExacta(List<ParamNode> parametros, List<Type> tiposArgs, List<String> tiposUsuarioArgs, int linea) {
+        if (parametros.size() != tiposArgs.size()) return false;
+        for (int i = 0; i < parametros.size(); i++) {
+            ResolvedType rtParam = resolverTipoDeclarado(parametros.get(i).tipo, linea);
+            if (rtParam.tipo() != tiposArgs.get(i)) return false;
+            if (!java.util.Objects.equals(rtParam.tipoUsuario(), tiposUsuarioArgs.get(i))) return false;
+        }
+        return true;
+    }
+
     private void validarParametros(List<ParamNode> parametros, List<Expression> argumentos, String nombreCallable, int linea) {
         if (parametros.size() != argumentos.size()) {
             throw new SemanticException("La función/método '" + nombreCallable + "' espera "
@@ -173,10 +233,100 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         }
     }
 
+    // ================= ENCAPSULAMIENTO (fase 2) =================
+
+    /** Atributo encontrado en la cadena de herencia: el nodo y la clase que realmente lo declara. */
+    private record AtributoDeclarado(FieldNode nodo, String claseDeclarante) {}
+
+    /** Busca el atributo en la clase y luego en sus superclases (hoy la cadena es solo la propia clase). */
+    private AtributoDeclarado buscarAtributo(String clase, String nombre) {
+        int guarda = 0;
+        for (String c = clase; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
+            ClassDeclNode decl = contexto.classes.get(c);
+            if (decl == null) continue;
+            for (FieldNode f : decl.atributos) {
+                if (f.nombre.equals(nombre)) return new AtributoDeclarado(f, c);
+            }
+        }
+        return null;
+    }
+
+    /** ¿'hija' es 'ancestro' o desciende de él? (usa el mapa de herencia, vacío mientras no haya 'extends'). */
+    private boolean esSubclaseDe(String hija, String ancestro) {
+        int guarda = 0;
+        for (String c = hija; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
+            if (c.equals(ancestro)) return true;
+        }
+        return false;
+    }
+
+    private boolean mismoPaquete(String claseDeclarante) {
+        return Objects.equals(contexto.paquetesPorClase.getOrDefault(claseDeclarante, ""), paqueteActual);
+    }
+
+    /**
+     * Regla de acceso para un miembro declarado en 'claseDeclarante', usado desde el código que se analiza
+     * ahora (claseActual / paqueteActual; claseActual es null en un .pig o un .y):
+     *   public    -> siempre
+     *   private   -> solo dentro de la misma clase
+     *   default   -> solo dentro del mismo paquete
+     *   protected -> mismo paquete, o desde una subclase (aunque esté en otro paquete)
+     */
+    private boolean puedeAcceder(Visibilidad visibilidad, String claseDeclarante) {
+        return switch (visibilidad) {
+            case PUBLIC -> true;
+            case PRIVATE -> claseActual != null && claseActual.equals(claseDeclarante);
+            case DEFAULT -> mismoPaquete(claseDeclarante);
+            case PROTECTED -> mismoPaquete(claseDeclarante)
+                    || (claseActual != null && esSubclaseDe(claseActual, claseDeclarante));
+        };
+    }
+
+    /** "'modelo'" / "por defecto" (se usa después de "paquete"). */
+    private static String nombrePaquete(String paquete) {
+        return paquete == null || paquete.isEmpty() ? "por defecto" : "'" + paquete + "'";
+    }
+
+    /**
+     * Lanza el error semántico si el miembro no es accesible desde el código actual.
+     * @param tipoMiembro "atributo", "método" o "constructor" (solo para el mensaje)
+     */
+    private void verificarAcceso(String tipoMiembro, String nombre, String claseDeclarante,
+                                 Visibilidad visibilidad, ASTNode donde) {
+        if (puedeAcceder(visibilidad, claseDeclarante)) return;
+
+        String origen = claseActual != null
+                ? "la clase '" + claseActual + "'"
+                : "el programa principal del paquete " + nombrePaquete(paqueteActual);
+        String regla = switch (visibilidad) {
+            case PRIVATE -> "solo es accesible dentro de la clase '" + claseDeclarante + "'";
+            case PROTECTED -> "solo es accesible desde el paquete "
+                    + nombrePaquete(contexto.paquetesPorClase.getOrDefault(claseDeclarante, ""))
+                    + " o desde subclases de '" + claseDeclarante + "'";
+            default -> "solo es accesible desde clases del paquete "
+                    + nombrePaquete(contexto.paquetesPorClase.getOrDefault(claseDeclarante, ""));
+        };
+        String nombreCompleto = tipoMiembro.equals("constructor") ? "de '" + claseDeclarante + "'"
+                : "'" + nombre + "' de '" + claseDeclarante + "'";
+        throw new SemanticException("No se puede acceder al " + tipoMiembro + " " + nombreCompleto
+                + " desde " + origen + ": es " + visibilidad.etiqueta() + " y " + regla
+                + " (línea " + donde.getLine() + ")", donde.getLine(), donde.getColumn());
+    }
+
     // ================= DECLARACIONES =================
 
     @Override
     public Type visit(ProgramNode n) {
+        String paqueteAnterior = paqueteActual;
+        paqueteActual = n.paquete == null ? "" : n.paquete;
+        try {
+            return visitarPrograma(n);
+        } finally {
+            paqueteActual = paqueteAnterior;
+        }
+    }
+
+    private Type visitarPrograma(ProgramNode n) {
         for (var d : n.declaraciones) {
             if (d instanceof FunctionDeclNode f && !f.esMetodo) {
                 if (contexto.funciones.containsKey(f.nombre)) {
@@ -262,6 +412,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             throw new SemanticException("El nombre '" + n.nombre + "' ya está usado por una función importada (línea " + n.getLine() + ")");
         }
         contexto.classes.put(n.nombre, n);
+        contexto.paquetesPorClase.put(n.nombre, paqueteActual);
 
         Map<String, ResolvedType> layout = new LinkedHashMap<>();
         Map<String, List<Integer>> dimensiones = new LinkedHashMap<>();
@@ -276,6 +427,20 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         Map<String, FunctionDeclNode> metodos = new LinkedHashMap<>();
         for (FunctionDeclNode m : n.metodos) metodos.put(m.nombre, m);
         contexto.metodosPorClase.put(n.nombre, metodos);
+
+        // Sobrecarga de métodos: se guardan todas las firmas; no pueden repetirse los mismos parámetros.
+        Map<String, List<FunctionDeclNode>> sobrecargas = new LinkedHashMap<>();
+        for (FunctionDeclNode m : n.metodos) {
+            List<FunctionDeclNode> lista = sobrecargas.computeIfAbsent(m.nombre, k -> new ArrayList<>());
+            for (FunctionDeclNode otro : lista) {
+                if (otro.nombreCodigo().equals(m.nombreCodigo())) {
+                    throw new SemanticException("El método '" + m.nombre + "' ya está definido con los mismos parámetros en la clase '"
+                            + n.nombre + "' (línea " + m.getLine() + ")");
+                }
+            }
+            lista.add(m);
+        }
+        contexto.sobrecargasPorClase.put(n.nombre, sobrecargas);
         contexto.constructoresPorClase.put(n.nombre, n.constructores);
 
         for (var ctor : n.constructores) ctor.accept(this);
@@ -386,6 +551,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                 litStruct.tipoResuelto = Type.ESTRUCTURA;
             }
 
+            if (initNode instanceof ReadNode lectura && lectura.variableDestino == null) lectura.tipoEsperado = rt.tipo();
             Type tipoInit = initNode.accept(this);
             String tipoUsuarioInit = tipoUsuarioDe(initNode);
 
@@ -402,6 +568,31 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                 throw new SemanticException("No se puede asignar " + etiquetaTipo(tipoInit, tipoUsuarioInit)
                         + " a " + rt.etiqueta() + " en la variable '" + n.nombre
                         + "' (línea " + n.getLine() + ")");
+            }
+
+            // int[][] m = new int[3][3];  -> con tamaños constantes, las dimensiones de la variable salen del 'new'.
+            // Si algún tamaño es una expresión (new int[n]) la variable queda con tamaño en tiempo de ejecución (-1).
+            if (initNode instanceof NewArrayNode nuevoArr && !n.dimensionesArreglo.isEmpty()
+                    && n.dimensionesArreglo.contains(-1) && n.dimensionesArreglo.size() == nuevoArr.dimensiones.size()) {
+                List<Integer> constantes = new ArrayList<>();
+                for (Expression d : nuevoArr.dimensiones) {
+                    if (d instanceof LiteralNode lit && lit.valorCrudo.matches("\\d+")) constantes.add(Integer.parseInt(lit.valorCrudo));
+                    else { constantes = null; break; }
+                }
+                if (constantes != null) n.dimensionesArreglo = constantes;
+            }
+
+            // int[][] m = new int[3][3];  -> las dimensiones se toman del 'new' cuando se declaró sin tamaño
+            if (initNode instanceof ArrayLiteralNode literalNew && literalNew.dimensionesNew != null
+                    && !n.dimensionesArreglo.isEmpty() && n.dimensionesArreglo.contains(-1)
+                    && n.dimensionesArreglo.size() == literalNew.dimensionesNew.size()) {
+                n.dimensionesArreglo = new ArrayList<>(literalNew.dimensionesNew);
+            }
+
+            // int[] numeros = {10, 20, 30};  -> el tamaño se toma del literal cuando se declaró sin tamaño ('[]')
+            if (initNode instanceof ArrayLiteralNode literalInferido && n.dimensionesArreglo.size() == 1
+                    && n.dimensionesArreglo.get(0) < 0 && rt.tipo() != Type.ESTRUCTURA) {
+                n.dimensionesArreglo = new ArrayList<>(List.of(contarValoresPlanos(literalInferido)));
             }
 
             // Para arreglos de N dimensiones (series matriz[2][3] : ... {{...},{...}}),
@@ -432,6 +623,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
     public Type visit(AssignNode n) {
         Type tipoDestino = n.destino.accept(this);
         String tipoUsuarioDestino = tipoUsuarioDe(n.destino);
+        if (n.valor instanceof ReadNode lectura && lectura.variableDestino == null) lectura.tipoEsperado = tipoDestino;
         Type tipoValor = n.valor.accept(this);
         String tipoUsuarioValor = tipoUsuarioDe(n.valor);
 
@@ -586,6 +778,9 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             if (s == null) throw new SemanticException("Variable no declarada: " + n.variableDestino
                     + " (línea " + n.getLine() + ")");
             tipo = s.tipo;
+        } else if (n.tipoEsperado == Type.ENTERO || n.tipoEsperado == Type.FLOTANTE || n.tipoEsperado == Type.CARACTER
+                || n.tipoEsperado == Type.BOOL || n.tipoEsperado == Type.CADENA) {
+            tipo = n.tipoEsperado;      // leer() se lee con el tipo de la variable que lo recibe
         } else {
             tipo = Type.CADENA;
         }
@@ -739,8 +934,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                 && n.base instanceof IdentifierNode idBase2
                 && !n.sufijos.isEmpty() && n.sufijos.get(0) instanceof CallSuffix
                 && claseActual != null
-                && contexto.metodosPorClase.containsKey(claseActual)
-                && contexto.metodosPorClase.get(claseActual).containsKey(idBase2.nombre);
+                && tieneMetodo(claseActual, idBase2.nombre);
 
         Type tipoActual;
         String tipoUsuarioActual;
@@ -776,6 +970,12 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                     throw new SemanticException("'" + tipoUsuarioActual + "' no tiene un campo llamado '"
                             + fs.nombreCampo + "' (línea " + n.getLine() + ")");
                 }
+                if (tipoActual == Type.CLASE) {
+                    AtributoDeclarado decl = buscarAtributo(tipoUsuarioActual, fs.nombreCampo);
+                    if (decl != null) {
+                        verificarAcceso("atributo", fs.nombreCampo, decl.claseDeclarante(), decl.nodo().visibilidad, n);
+                    }
+                }
                 tipoActual = campo.tipo();
                 tipoUsuarioActual = campo.tipoUsuario();
 
@@ -793,12 +993,13 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                 if (nombreMetodo != null && tipoUsuarioActual != null
                         && contexto.metodosPorClase.containsKey(tipoUsuarioActual)) {
 
-                    FunctionDeclNode metodo = contexto.metodosPorClase.get(tipoUsuarioActual).get(nombreMetodo.nombreCampo);
+                    FunctionDeclNode metodo = resolverMetodo(tipoUsuarioActual, nombreMetodo.nombreCampo, call, n.getLine());
                     if (metodo == null) {
                         throw new SemanticException("La clase '" + tipoUsuarioActual + "' no tiene un método '"
                                 + nombreMetodo.nombreCampo + "' (línea " + n.getLine() + ")");
                     }
 
+                    verificarAcceso("método", metodo.nombre, metodo.claseDuena, metodo.visibilidad, n);
                     validarParametros(metodo.parametros, call.argumentos, tipoUsuarioActual + "." + nombreMetodo.nombreCampo, n.getLine());
                     ResolvedType rtRetorno = resolverTipoDeclarado(metodo.tipoRetorno, n.getLine());
                     tipoActual = rtRetorno.tipo();
@@ -815,8 +1016,9 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
 
                 } else if (esLlamadaAMetodoImplicito && i == 0) {
                     String nombreMetodoImplicito = ((IdentifierNode) n.base).nombre;
-                    FunctionDeclNode metodo = contexto.metodosPorClase.get(claseActual).get(nombreMetodoImplicito);
+                    FunctionDeclNode metodo = resolverMetodo(claseActual, nombreMetodoImplicito, call, n.getLine());
 
+                    verificarAcceso("método", metodo.nombre, metodo.claseDuena, metodo.visibilidad, n);
                     validarParametros(metodo.parametros, call.argumentos,
                             claseActual + "." + nombreMetodoImplicito, n.getLine());
                     ResolvedType rtRetorno = resolverTipoDeclarado(metodo.tipoRetorno, n.getLine());
@@ -853,6 +1055,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         for (ConstructorDeclNode ctor : constructores) {
             if (coincideFirma(ctor.parametros, tiposArgs, tiposUsuarioArgs, n.getLine())) {
                 coincide = true;
+                verificarAcceso("constructor", n.nombreClase, n.nombreClase, ctor.visibilidad, n);
                 break;
             }
         }
@@ -875,6 +1078,20 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             }
         }
         return true;
+    }
+
+    @Override
+    public Type visit(NewArrayNode n) {
+        for (Expression d : n.dimensiones) {
+            Type t = d.accept(this);
+            if (t != Type.ENTERO) {
+                throw new SemanticException("El tamaño de un arreglo debe ser entero, no " + t + " (línea " + n.getLine() + ")");
+            }
+        }
+        ResolvedType rt = resolverTipoDeclarado(n.tipoElemento, n.getLine());
+        n.tipoResuelto = rt.tipo();
+        n.tipoUsuarioResuelto = rt.tipoUsuario();
+        return rt.tipo();
     }
 
     @Override
