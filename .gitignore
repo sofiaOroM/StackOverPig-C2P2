@@ -1,0 +1,24 @@
+# Maven
+target/
+
+# Java
+*.class
+*.jar
+
+# Archivos generados
+*.asm
+dependency-reduced-pom.xml
+
+# Comprimidos
+*.zip
+
+# PDFs
+*.pdf
+
+# Archivos locales
+Laberinto
+Laberinto2
+
+# IntelliJ
+.idea/
+*.iml
