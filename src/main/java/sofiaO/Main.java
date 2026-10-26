@@ -168,4 +168,4 @@ public class Main {
         System.out.println("\n--- CÓDIGO C ---");
         System.out.println(emisor.emitir(generador.cuartetas, generador.tiposDeLugares));
     }
-}
+}

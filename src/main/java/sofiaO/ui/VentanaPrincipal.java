@@ -64,7 +64,10 @@ final class VentanaPrincipal implements PanelArbol.Acciones {
     private final TabPane pestanas = new TabPane();
     private final PanelArbol arbol = new PanelArbol(this);
     private final VistaPrevia vistaPrevia = new VistaPrevia(tamanoFuente);
-    private final PanelResultados resultados = new PanelResultados(tamanoFuente, this::guardarResultado, this::ejecutarCodigoC);
+    private final PanelResultados resultados = new PanelResultados(tamanoFuente, this::guardarResultado, new PanelResultados.Ejecutor() {
+        @Override public void ejecutar(String codigoC, String nombreBase) { ejecutarCodigoC(codigoC, nombreBase); }
+        @Override public void ejecutarRiscV(String codigoRiscV, String nombreBase) { ejecutarCodigoRiscV(codigoRiscV, nombreBase); }
+    });
 
     private final ServicioCompilacion servicio = new ServicioCompilacion();
     private final BooleanProperty compilando = new SimpleBooleanProperty(false);
@@ -713,6 +716,17 @@ final class VentanaPrincipal implements PanelArbol.Acciones {
         ConsolaEjecucion consola = new ConsolaEjecucion(escenario, css, nombreBase);
         consola.show();
         EJECUTOR_PROGRAMAS.execute(() -> consola.compilarYEjecutar(codigoC, nombreBase));
+    }
+
+    /** Se conecta al botón "Ejecutar" de la pestaña RISC-V: corre el ensamblador generado con RARS en una consola. */
+    private void ejecutarCodigoRiscV(String codigoRiscV, String nombreBase) {
+        if (codigoRiscV == null || codigoRiscV.isBlank()) return;
+        String css = escenario.getScene() != null && !escenario.getScene().getStylesheets().isEmpty()
+                ? escenario.getScene().getStylesheets().get(0)
+                : null;
+        ConsolaEjecucion consola = new ConsolaEjecucion(escenario, css, nombreBase + " (RISC-V)");
+        consola.show();
+        EJECUTOR_PROGRAMAS.execute(() -> consola.ejecutarRiscV(codigoRiscV, nombreBase));
     }
 
     private void irAlError(ErrorCompilador error) {
