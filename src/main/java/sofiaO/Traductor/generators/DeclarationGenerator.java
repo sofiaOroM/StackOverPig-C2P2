@@ -1,11 +1,13 @@
 package sofiaO.Traductor.generators;
 
 import sofiaO.ast.ASTNode;
+import sofiaO.ast.Expression;
 import sofiaO.ast.Statement;
 import sofiaO.ast.declaracion.*;
 import sofiaO.util.Type;
 import sofiaO.util.TypeMapper;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -88,7 +90,33 @@ public class DeclarationGenerator {
         ctx.emit("param", "this", null, null, Type.CLASE);
         ctx.placeTypes().put("this", Type.CLASE);
         ctx.placeUserTypes().put("this", claseDuena);
+        generarLlamadaAlConstructorDelPadre(claseDuena, null);
         ctx.emit("endfunc", null, null, nombreCompleto, Type.VOID);
+    }
+
+    /**
+     * Herencia: al crear un objeto de una clase hija primero se inicializa la parte del padre.
+     * Emite   call Padre_init[_N](this, args...)   con los argumentos de super(...), o sin argumentos si el
+     * programador no escribió super (llamada implícita al constructor sin parámetros). No hace nada si la
+     * clase no hereda. El semántico ya comprobó que ese constructor del padre existe y es accesible.
+     */
+    private void generarLlamadaAlConstructorDelPadre(String clase, List<Expression> argumentosSuper) {
+        if (ctx.context() == null) return;
+        String padre = ctx.context().superclases.get(clase);
+        if (padre == null) return;
+
+        List<String> args = new ArrayList<>();
+        List<Type> tipos = new ArrayList<>();
+        args.add("this");
+        tipos.add(Type.CLASE);
+        if (argumentosSuper != null) {
+            for (Expression a : argumentosSuper) {
+                args.add(ctx.generate((ASTNode) a));
+                tipos.add(ctx.typeOf((ASTNode) a));
+            }
+        }
+        String initPadre = nombreInitPara(padre, args.size() - 1);
+        ctx.emitVariadic("call", initPadre, ctx.newTemp(Type.VOID), Type.VOID, args, tipos);
     }
 
     public String visit(FunctionDeclNode n) {
@@ -128,12 +156,15 @@ public class DeclarationGenerator {
         ctx.startLocals(nombresParametros);
 
         for (ParamNode p : n.parametros) ctx.generate(p);
+        generarLlamadaAlConstructorDelPadre(n.claseDuena, n.argumentosSuper);
         for (Statement s : n.cuerpo) ctx.generate(s);
         ctx.emit("endfunc", null, null, nombreCompleto, Type.VOID);
         return null;
     }
 
     public String visit(VarDeclNode n) {
+        // Una variable local puede tener el mismo nombre que un atributo: desde aquí el nombre es la local.
+        ctx.currentMethodLocals().add(n.nombre);
         Type tipo = TypeMapper.deTexto(n.tipo);
         if (tipo == Type.ERROR) {
             tipo = TypeMapper.deUsuario(n.tipo);
@@ -226,4 +257,4 @@ public class DeclarationGenerator {
             }
         }
     }
-}
+}

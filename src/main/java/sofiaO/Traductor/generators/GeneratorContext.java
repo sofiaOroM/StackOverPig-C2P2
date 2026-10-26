@@ -23,6 +23,8 @@ public interface GeneratorContext {
     // ---- Emisión de cuartetas ----
     void emit(String op, String arg1, String arg2, String result, Type tipo);
     void emitVariadic(String op, String arg1, String result, Type tipo, List<String> extra, List<Type> tiposExtra);
+    /** Llamada que NO se despacha por la vtable (super.metodo()): salta directo a esa versión del método. */
+    void emitirLlamadaDirecta(String funcion, String result, Type tipo, List<String> extra, List<Type> tiposExtra);
     void emitLabel(String etiqueta);
     String newTemp(Type tipo);
     /** Como newTemp, pero además recuerda que ese temporal es de un tipo de usuario (Nodo, Persona...). */
@@ -73,4 +75,4 @@ public interface GeneratorContext {
     // ---- Mapas compartidos con CEmitter (se exponen tal cual, mutables) ----
     Map<String, Type> placeTypes();
     Map<String, String> placeUserTypes();
-}
+}

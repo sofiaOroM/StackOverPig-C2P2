@@ -138,8 +138,14 @@ public class ExpressionGenerator {
         }
 
         String temp = ctx.newTempOf(tipoRetorno, tipoUsrRetorno);
-        String nombreFuncion = clase != null ? clase + "_" + (m != null ? m.nombreCodigo() : metodo) : metodo;
-        ctx.emitVariadic("call", nombreFuncion, temp, tipoRetorno, args, tipos);
+        // La función se llama con el nombre de la clase que DECLARA el método (puede ser una superclase de 'clase').
+        String duena = (m != null && m.claseDuena != null) ? m.claseDuena : clase;
+        String nombreFuncion = duena != null ? duena + "_" + (m != null ? m.nombreCodigo() : metodo) : metodo;
+        if (cs.esSuper) {
+            ctx.emitirLlamadaDirecta(nombreFuncion, temp, tipoRetorno, args, tipos);   // super.metodo(): sin vtable
+        } else {
+            ctx.emitVariadic("call", nombreFuncion, temp, tipoRetorno, args, tipos);   // con vtable: polimorfismo
+        }
         return new Step(temp, tipoUsrRetorno);
     }
 
@@ -178,6 +184,11 @@ public class ExpressionGenerator {
                 }
                 String indiceFinal = ctx.flattenIndices(nombreBase, direccion, indices);
                 Type tipoElemento = ctx.typeOfPlace(direccion);
+                // Arreglo de objetos/estructuras (ej. Cuenta[] cuentas): el elemento es CLASE/ESTRUCTURA, no ERROR.
+                if (tipoElemento == Type.ERROR && tipoUsr != null) {
+                    ResolvedType re = ctx.resolveTypeText(tipoUsr);
+                    if (re != null && re.tipo() != Type.ERROR) tipoElemento = re.tipo();
+                }
                 String temp = ctx.newTempOf(tipoElemento, tipoUsr);
                 ctx.emit("getindex", direccion, indiceFinal, temp, tipoElemento);
                 direccion = temp;
@@ -202,6 +213,10 @@ public class ExpressionGenerator {
             if (s instanceof FieldSuffix fs) {
                 ResolvedType campo = ctx.typeOfField(tipoUsr, fs.nombreCampo);
                 Type tipoCampo = campo != null ? campo.tipo() : tipoFinal;
+                if (campo != null && tipoCampo == Type.ERROR && campo.tipoUsuario() != null) {
+                    ResolvedType rc = ctx.resolveTypeText(campo.tipoUsuario());   // atributo de tipo clase/estructura
+                    if (rc != null && rc.tipo() != Type.ERROR) tipoCampo = rc.tipo();
+                }
                 tipoUsr = campo != null ? campo.tipoUsuario() : null;
                 String temp = ctx.newTempOf(tipoCampo, tipoUsr);
                 ctx.emit("getfield", direccion, fs.nombreCampo, temp, tipoCampo);
@@ -345,4 +360,4 @@ public class ExpressionGenerator {
         }
         return temp;
     }
-}
+}
