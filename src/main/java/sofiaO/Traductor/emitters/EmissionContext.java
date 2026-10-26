@@ -26,4 +26,4 @@ public interface EmissionContext {
      * Los campos (y su tipo) de una clase o estructura declarada por el usuario.
      */
     Map<String, ResolvedType> camposDe(String nombreTipoUsuario);
-}
+}

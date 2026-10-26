@@ -27,4 +27,4 @@ public class EmitterRegistry {
     public InstructionEmitter buscar(String operacion) {
         return emisores.get(operacion);
     }
-}
+}

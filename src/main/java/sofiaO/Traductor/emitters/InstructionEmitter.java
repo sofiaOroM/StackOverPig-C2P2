@@ -12,4 +12,4 @@ public interface InstructionEmitter {
 
     /** Traduce una cuarteta a su línea de C */
     String emitir(Quadruple q, EmissionContext ctx);
-}
+}
