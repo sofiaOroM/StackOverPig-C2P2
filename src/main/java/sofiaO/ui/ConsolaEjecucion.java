@@ -14,6 +14,7 @@ import javafx.scene.layout.Region;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import sofiaO.servicio.EjecutorC;
+import sofiaO.servicio.EjecutorRiscV;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -94,6 +95,45 @@ final class ConsolaEjecucion extends Stage {
                 Platform.runLater(() -> agregarSalida(compilacion.mensaje));
             }
             proceso = EjecutorC.ejecutar(compilacion.ejecutable);
+            Platform.runLater(() -> {
+                estado.setText("Ejecutando…");
+                entrada.setDisable(false);
+                enviar.setDisable(false);
+                entrada.requestFocus();
+            });
+            leerSalidaDelProceso();
+            int codigo = proceso.waitFor();
+            Platform.runLater(() -> {
+                estado.setText(detenidoPorUsuario ? "Detenido por el usuario." : "Terminó con código " + codigo + ".");
+                entrada.setDisable(true);
+                enviar.setDisable(true);
+                detener.setDisable(true);
+            });
+        } catch (IOException e) {
+            Platform.runLater(() -> {
+                estado.setText("Error al ejecutar.");
+                agregarSalida("No se pudo ejecutar el programa: " + e.getMessage());
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            EjecutorC.borrarCarpeta(carpetaTemporal);
+        }
+    }
+
+    /** Ejecuta el código RISC-V generado con RARS (modo consola); debe llamarse fuera del hilo de la interfaz. */
+    void ejecutarRiscV(String codigoRiscV, String nombreBase) {
+        try {
+            EjecutorRiscV.Preparacion prep = EjecutorRiscV.iniciar(codigoRiscV, nombreBase);
+            if (!prep.exito) {
+                Platform.runLater(() -> {
+                    estado.setText("No se pudo ejecutar.");
+                    agregarSalida(prep.mensaje);
+                });
+                return;
+            }
+            this.carpetaTemporal = prep.carpetaTemporal;
+            proceso = prep.proceso;
             Platform.runLater(() -> {
                 estado.setText("Ejecutando…");
                 entrada.setDisable(false);

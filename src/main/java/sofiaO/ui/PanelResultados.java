@@ -38,6 +38,9 @@ final class PanelResultados extends TabPane {
     /** Lo que el panel le pide a la ventana principal para compilar y ejecutar el código C generado. */
     interface Ejecutor {
         void ejecutar(String codigoC, String nombreBase);
+
+        /** Ejecuta el código RISC-V generado (con RARS) en una consola. */
+        void ejecutarRiscV(String codigoRiscV, String nombreBase);
     }
 
     private final Guardador guardador;
@@ -388,8 +391,13 @@ final class PanelResultados extends TabPane {
     }
 
     private Region crearContenidoRiscV() {
-        Label ayuda = new Label("Ábrelo en RARS (File > Open), luego Assemble y Run.");
+        Label ayuda = new Label("También puedes abrirlo en RARS (File > Open, Assemble y Run).");
         ayuda.getStyleClass().add("vacio");
+
+        Button ejecutar = new Button("▶ Ejecutar");
+        ejecutar.getStyleClass().add("boton-primario");
+        ejecutar.setOnAction(e -> ejecutor.ejecutarRiscV(codigoRiscV, nombreBase));
+        ejecutar.disableProperty().bind(hayRiscV.not());
 
         Button copiar = new Button("Copiar");
         copiar.setOnAction(e -> copiar(codigoRiscV));
@@ -400,7 +408,7 @@ final class PanelResultados extends TabPane {
 
         Region espacio = new Region();
         HBox.setHgrow(espacio, Priority.ALWAYS);
-        HBox barra = new HBox(6, ayuda, espacio, copiar, guardar);
+        HBox barra = new HBox(6, ejecutar, ayuda, espacio, copiar, guardar);
         barra.setAlignment(Pos.CENTER_LEFT);
         barra.getStyleClass().add("barra-panel");
 
