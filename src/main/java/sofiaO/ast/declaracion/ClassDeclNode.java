@@ -12,6 +12,10 @@ public class ClassDeclNode extends BaseNode implements Declaration {
     public List<FieldNode> atributos;
     public List<ConstructorDeclNode> constructores;
     public List<FunctionDeclNode> metodos;
+    /** Nombre de la superclase ('extends'), o null si la clase no hereda de otra. */
+    public String superclase;
+    public int lineaSuperclase;
+    public int columnaSuperclase;
 
     public ClassDeclNode(String nombre, List<FieldNode> atributos, List<ConstructorDeclNode> constructores,
                          List<FunctionDeclNode> metodos, int line, int column) {

@@ -19,4 +19,4 @@ public class BinaryExprNode extends BaseNode implements Expression {
 
     @Override
     public <T> T accept(ASTVisitor<T> v) { return v.visit(this); }
-}
+}

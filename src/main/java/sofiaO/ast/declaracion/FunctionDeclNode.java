@@ -17,6 +17,8 @@ public class FunctionDeclNode extends BaseNode implements Declaration {
     public String claseDuena;    // nombre de la clase si esMetodo == true; null si no
     /** Encapsulamiento del método (Zetariano). Las funciones libres (Y?) y los MAIOR> (Pig Latin) son PUBLIC. */
     public Visibilidad visibilidad = Visibilidad.PUBLIC;
+    /** true si el método lleva @Override (obligatorio al sobrescribir un método de una superclase). */
+    public boolean esOverride = false;
 
     public FunctionDeclNode(String nombre, List<ParamNode> parametros, String tipoRetorno,
                             List<Statement> cuerpo, boolean esMetodo, String claseDuena,

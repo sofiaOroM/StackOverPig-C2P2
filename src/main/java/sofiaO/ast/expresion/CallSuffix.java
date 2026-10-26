@@ -10,5 +10,7 @@ public class CallSuffix implements Suffix {
     public List<Expression> argumentos;
     /** Método elegido por el semántico (resuelve la sobrecarga); null si es una función libre. */
     public FunctionDeclNode metodoResuelto;
+    /** true en super.metodo(...): se busca desde la superclase y se llama a ESA versión (sin despacho dinámico). */
+    public boolean esSuper = false;
     public CallSuffix(List<Expression> argumentos) { this.argumentos = argumentos; }
 }

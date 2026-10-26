@@ -15,7 +15,7 @@ public class ForNode extends BaseNode implements Statement {
     public List<Statement> cuerpo;
 
     public ForNode(Statement inicializacion, Expression condicion, Statement actualizacion,
-                   List<Statement> cuerpo, int line, int column) {
+                    List<Statement> cuerpo, int line, int column) {
         super(line, column);
         this.inicializacion = inicializacion;
         this.condicion = condicion;
