@@ -10,8 +10,9 @@ programa
     ;
 
 // 'public' es opcional en la clase (el enunciado de la fase 2 usa también 'class Impresora {').
+// HERENCIA (fase 2): public class Perro extends Animal { ... }  (una sola superclase, cada clase en su .z)
 claseDecl
-    : PUBLIC? CLASS ID '{' miembroClase* '}'
+    : PUBLIC? CLASS nombre=ID (EXTENDS padre=ID)? '{' miembroClase* '}'
     ;
 
 miembroClase
@@ -34,15 +35,24 @@ atributo
     ;
 
 // public Persona(String nombreParametro, int edadParametro) { ... }
+// En una clase hija, la primera sentencia puede ser super(...) para elegir el constructor del padre;
+// si se omite, se llama implícitamente al constructor sin parámetros del padre.
 constructorDecl
-    : modificador? ID '(' parametros? ')' bloque
+    : modificador? ID '(' parametros? ')' '{' superLlamada? sentencia* '}'
+    ;
+
+// super(nombreParametro, edadParametro);
+superLlamada
+    : SUPER '(' argumentos? ')' ';'
     ;
 
 // public void saludar() { ... }
 // private int calcularAnioNacimiento(int anioActual) { ... }
 // protected String obtenerNombre() { ... }
+// POLIMORFISMO (fase 2): @Override es OBLIGATORIO para sobrescribir un método de una superclase.
+//   @Override public void imprimir() { ... }
 metodoDecl
-    : modificador? (tipo | VOID) ID '(' parametros? ')' bloque
+    : OVERRIDE? modificador? (tipo | VOID) ID '(' parametros? ')' bloque
     ;
 
 parametros
@@ -221,6 +231,7 @@ expresionUnaria
 
 expresionPrimaria
     : '(' expresion ')'                              # exprParentesis
+    | SUPER '.' ID '(' argumentos? ')'                # exprSuperLlamada   // super.metodo(...): versión del padre
     | NEW ID '(' argumentos? ')'                      # exprNuevoObjeto
     | NEW (INT|DOUBLE|CHAR|BOOLEAN|STRINGKEY|ID) ('[' expresion ']')+ # exprNuevoArreglo
     | acceso                                          # exprAcceso
@@ -262,6 +273,9 @@ PUBLIC   : 'public';
 PRIVATE  : 'private';
 PROTECTED: 'protected';
 CLASS    : 'class';
+EXTENDS  : 'extends';
+SUPER    : 'super';
+OVERRIDE : '@Override';
 VOID     : 'void';
 NEW      : 'new';
 

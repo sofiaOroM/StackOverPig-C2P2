@@ -31,7 +31,7 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
 
     @Override
     public ASTNode visitClaseDecl(ZetarianoLanguageParser.ClaseDeclContext ctx) {
-        String nombreClase = ctx.ID().getText();
+        String nombreClase = ctx.nombre.getText();
         List<FieldNode> atributos = new ArrayList<>();
         List<ConstructorDeclNode> constructores = new ArrayList<>();
         List<FunctionDeclNode> metodos = new ArrayList<>();
@@ -46,8 +46,14 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
             }
         }
 
-        return new ClassDeclNode(nombreClase, atributos, constructores, metodos,
+        ClassDeclNode clase = new ClassDeclNode(nombreClase, atributos, constructores, metodos,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+        if (ctx.padre != null) {
+            clase.superclase = ctx.padre.getText();
+            clase.lineaSuperclase = ctx.padre.getLine();
+            clase.columnaSuperclase = ctx.padre.getCharPositionInLine();
+        }
+        return clase;
     }
 
     @Override
@@ -72,10 +78,18 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
     private ConstructorDeclNode construirConstructor(ZetarianoLanguageParser.ConstructorDeclContext ctx,
                                                      String claseDuena) {
         List<ParamNode> parametros = ctx.parametros() != null ? convertirParametros(ctx.parametros()) : new ArrayList<>();
-        List<Statement> cuerpo = convertirBloque(ctx.bloque());
+        List<Statement> cuerpo = new ArrayList<>();
+        for (var sentencia : ctx.sentencia()) cuerpo.add((Statement) visit(sentencia));
         ConstructorDeclNode ctor = new ConstructorDeclNode(claseDuena, parametros, cuerpo,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
         ctor.visibilidad = visibilidadDe(ctx.modificador());
+        if (ctx.superLlamada() != null) {
+            var llamadaSuper = ctx.superLlamada();
+            ctor.argumentosSuper = llamadaSuper.argumentos() != null
+                    ? convertirArgumentos(llamadaSuper.argumentos()) : new ArrayList<>();
+            ctor.lineaSuper = llamadaSuper.getStart().getLine();
+            ctor.columnaSuper = llamadaSuper.getStart().getCharPositionInLine();
+        }
         return ctor;
     }
 
@@ -87,6 +101,7 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         FunctionDeclNode metodo = new FunctionDeclNode(nombre, parametros, tipoRetorno, cuerpo, true, claseDuena,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
         metodo.visibilidad = visibilidadDe(ctx.modificador());
+        metodo.esOverride = ctx.OVERRIDE() != null;
         return metodo;
     }
 
@@ -442,6 +457,20 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         return visit(ctx.expresion());
     }
 
+    /** super.metodo(args)  ->  this.metodo(args) marcado como llamada a la versión del padre. */
+    @Override
+    public ASTNode visitExprSuperLlamada(ZetarianoLanguageParser.ExprSuperLlamadaContext ctx) {
+        int line = ctx.getStart().getLine();
+        int column = ctx.getStart().getCharPositionInLine();
+        List<Expression> argumentos = ctx.argumentos() != null ? convertirArgumentos(ctx.argumentos()) : new ArrayList<>();
+        CallSuffix llamada = new CallSuffix(argumentos);
+        llamada.esSuper = true;
+        List<Suffix> sufijos = new ArrayList<>();
+        sufijos.add(new FieldSuffix(ctx.ID().getText()));
+        sufijos.add(llamada);
+        return new PostfixExprNode(new IdentifierNode("this", line, column), sufijos, line, column);
+    }
+
     @Override
     public ASTNode visitExprNuevoObjeto(ZetarianoLanguageParser.ExprNuevoObjetoContext ctx) {
         String nombreClase = ctx.ID().getText();
@@ -537,4 +566,4 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         return new LiteralNode(ctx.getText(),
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
-}
+}
