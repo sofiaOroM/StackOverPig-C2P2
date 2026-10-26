@@ -545,4 +545,4 @@ static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) 
         if (!"sin_salto".equals(q.arg1)) sb.append("    printf(\"\\n\");\n");
         return sb.toString();
     }
-}
+}
