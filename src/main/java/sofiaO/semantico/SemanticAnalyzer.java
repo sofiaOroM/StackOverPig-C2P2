@@ -114,7 +114,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
 
     private Map<String, ResolvedType> obtenerLayout(Type tipo, String tipoUsuario) {
         if (tipo == Type.ESTRUCTURA) return contexto.layoutsEstructuras.get(tipoUsuario);
-        if (tipo == Type.CLASE) return contexto.layoutsClases.get(tipoUsuario);
+        if (tipo == Type.CLASE) return contexto.layoutCompletoDeClase(tipoUsuario);   // incluye los atributos heredados
         return null;
     }
 
@@ -144,12 +144,25 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         return total;
     }
 
+    /**
+     * Deja visibles por su nombre los atributos de la clase y los heredados de sus superclases. Un atributo
+     * heredado que no se puede acceder desde aquí (private del padre, default de otro paquete...) no se
+     * declara: usarlo da el error de acceso (ver visit(IdentifierNode)).
+     */
     private void precargarAtributosDeClase(String nombreClase) {
-        Map<String, ResolvedType> layout = contexto.layoutsClases.get(nombreClase);
-        if (layout == null) return;
-        for (var entrada : layout.entrySet()) {
-            ResolvedType rt = entrada.getValue();
-            scopeActual.declarar(entrada.getKey(), rt.tipo(), rt.tipoUsuario(), 0, 0);
+        for (String c : contexto.cadenaDeHerencia(nombreClase)) {
+            Map<String, ResolvedType> layout = contexto.layoutsClases.get(c);
+            ClassDeclNode decl = contexto.classes.get(c);
+            if (layout == null) continue;
+            for (var entrada : layout.entrySet()) {
+                if (!c.equals(nombreClase) && decl != null) {
+                    Visibilidad v = decl.atributos.stream().filter(f -> f.nombre.equals(entrada.getKey()))
+                            .map(f -> f.visibilidad).findFirst().orElse(Visibilidad.PUBLIC);
+                    if (!puedeAcceder(v, c)) continue;
+                }
+                ResolvedType rt = entrada.getValue();
+                scopeActual.declarar(entrada.getKey(), rt.tipo(), rt.tipoUsuario(), 0, 0);
+            }
         }
     }
 
@@ -224,7 +237,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             String tipoUsuarioArg = tipoUsuarioDe(arg);
 
             ResolvedType rtParam = resolverTipoDeclarado(p.tipo, linea);
-            if (!TypeCoercionTable.compatibles(rtParam.tipo(), rtParam.tipoUsuario(), tipoArg, tipoUsuarioArg)) {
+            if (!compatibles(rtParam.tipo(), rtParam.tipoUsuario(), tipoArg, tipoUsuarioArg)) {
                 throw new SemanticException("Tipo incompatible para el parámetro '" + p.nombre
                         + "' en '" + nombreCallable + "': se esperaba " + rtParam.etiqueta()
                         + " pero se obtuvo " + etiquetaTipo(tipoArg, tipoUsuarioArg)
@@ -233,12 +246,154 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         }
     }
 
+    // ================= HERENCIA (fase 2) =================
+
+    /**
+     * Compatibilidad de asignación entre tipos: igual que TypeCoercionTable, más la regla de herencia:
+     * un objeto de una clase hija se puede usar donde se espera su clase padre (Animal a = new Perro()).
+     */
+    private boolean compatibles(Type destino, String tipoUsuarioDestino, Type origen, String tipoUsuarioOrigen) {
+        if (destino == Type.CLASE && origen == Type.CLASE && tipoUsuarioDestino != null && tipoUsuarioOrigen != null
+                && esSubclaseDe(tipoUsuarioOrigen, tipoUsuarioDestino)) {
+            return true;
+        }
+        return TypeCoercionTable.compatibles(destino, tipoUsuarioDestino, origen, tipoUsuarioOrigen);
+    }
+
+    /**
+     * Registra 'extends' y valida: la superclase existe (y es una clase), no es la propia clase, no hay ciclos
+     * y la hija no vuelve a declarar un atributo que ya tiene alguna superclase.
+     */
+    private void registrarSuperclase(ClassDeclNode n) {
+        int linea = n.lineaSuperclase > 0 ? n.lineaSuperclase : n.getLine();
+        int columna = n.lineaSuperclase > 0 ? n.columnaSuperclase : n.getColumn();
+        String padre = n.superclase;
+
+        if (padre.equals(n.nombre)) {
+            throw new SemanticException("La clase '" + n.nombre + "' no puede heredar de sí misma (línea " + linea + ")",
+                    linea, columna);
+        }
+        if (contexto.structs.containsKey(padre)) {
+            throw new SemanticException("La clase '" + n.nombre + "' no puede heredar de '" + padre
+                    + "': es una estructura, solo se puede heredar de clases (línea " + linea + ")", linea, columna);
+        }
+        if (!contexto.classes.containsKey(padre)) {
+            throw new SemanticException("La superclase '" + padre + "' de '" + n.nombre + "' no existe. "
+                    + "Debe haber un archivo " + padre + ".z con esa clase en la carpeta de trabajo (línea " + linea + ")",
+                    linea, columna);
+        }
+        if (esSubclaseDe(padre, n.nombre)) {
+            throw new SemanticException("Herencia circular: '" + n.nombre + "' y '" + padre
+                    + "' se heredan mutuamente (línea " + linea + ")", linea, columna);
+        }
+        contexto.superclases.put(n.nombre, padre);
+
+        for (FieldNode atributo : n.atributos) {
+            AtributoDeclarado heredado = buscarAtributo(padre, atributo.nombre);
+            if (heredado != null) {
+                throw new SemanticException("El atributo '" + atributo.nombre + "' de '" + n.nombre
+                        + "' ya está declarado en la superclase '" + heredado.claseDeclarante()
+                        + "' (línea " + atributo.getLine() + ")", atributo.getLine(), atributo.getColumn());
+            }
+        }
+    }
+
+    private static int rangoVisibilidad(Visibilidad v) {
+        return switch (v) { case PUBLIC -> 3; case PROTECTED -> 2; case DEFAULT -> 1; case PRIVATE -> 0; };
+    }
+
+    /** Método de alguna superclase (de 'clase' hacia arriba) con el mismo nombre y los mismos tipos de parámetros. */
+    private FunctionDeclNode buscarMetodoHeredado(String clase, FunctionDeclNode m) {
+        int guarda = 0;
+        for (String c = clase; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
+            var porNombre = contexto.sobrecargasPorClase.get(c);
+            if (porNombre == null) continue;
+            for (FunctionDeclNode otro : porNombre.getOrDefault(m.nombre, List.of())) {
+                if (otro.nombreCodigo().equals(m.nombreCodigo())) return otro;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Polimorfismo: un método de la hija con la misma firma que uno heredado lo SOBRESCRIBE y debe llevar @Override;
+     * y @Override solo es válido si realmente hay algo que sobrescribir. Además el tipo de retorno debe ser el mismo
+     * y la visibilidad no puede reducirse (public -> protected/private...).
+     */
+    private void validarSobrescritura(ClassDeclNode clase, FunctionDeclNode m) {
+        FunctionDeclNode heredado = clase.superclase == null ? null : buscarMetodoHeredado(clase.superclase, m);
+        int linea = m.getLine();
+        int columna = m.getColumn();
+        String firma = m.nombre + "(" + m.parametros.stream().map(p -> p.tipo + (p.dimensionesArreglo.isEmpty() ? "" : "[]"))
+                .collect(java.util.stream.Collectors.joining(", ")) + ")";
+
+        if (m.esOverride) {
+            if (heredado == null || heredado.visibilidad == Visibilidad.PRIVATE) {
+                throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' tiene @Override pero no "
+                        + "sobrescribe ningún método accesible de sus superclases (línea " + linea + ")", linea, columna);
+            }
+            String retornoNuevo = m.tipoRetorno == null ? "void" : m.tipoRetorno;
+            String retornoViejo = heredado.tipoRetorno == null ? "void" : heredado.tipoRetorno;
+            if (!retornoNuevo.equals(retornoViejo)) {
+                throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' devuelve " + retornoNuevo
+                        + " pero sobrescribe a '" + heredado.claseDuena + "." + firma + "', que devuelve " + retornoViejo
+                        + " (línea " + linea + ")", linea, columna);
+            }
+            if (rangoVisibilidad(m.visibilidad) < rangoVisibilidad(heredado.visibilidad)) {
+                throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' no puede ser "
+                        + m.visibilidad.etiqueta() + ": sobrescribe a un método " + heredado.visibilidad.etiqueta()
+                        + " de '" + heredado.claseDuena + "' y no se puede reducir su visibilidad (línea " + linea + ")",
+                        linea, columna);
+            }
+        } else if (heredado != null) {
+            if (heredado.visibilidad == Visibilidad.PRIVATE) {
+                throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' coincide con un método "
+                        + "private de la superclase '" + heredado.claseDuena + "': cambia su nombre o sus parámetros "
+                        + "(línea " + linea + ")", linea, columna);
+            }
+            throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' sobrescribe a '"
+                    + heredado.claseDuena + "." + firma + "': falta la anotación @Override (línea " + linea + ")",
+                    linea, columna);
+        }
+    }
+
+    /**
+     * Valida la llamada al constructor del padre desde un constructor de la hija (o desde el constructor por
+     * defecto). 'explicita' = el programador escribió super(...); si no, la llamada es super() implícito.
+     * Debe existir un constructor del padre que coincida con los argumentos y que la hija pueda invocar.
+     */
+    private void validarLlamadaAlPadre(String hija, List<Expression> argumentos, boolean explicita,
+                                       int linea, int columna) {
+        String padre = contexto.superclases.get(hija);
+        if (padre == null) return;
+
+        List<Type> tipos = new ArrayList<>();
+        List<String> tiposUsuario = new ArrayList<>();
+        for (Expression a : argumentos) { tipos.add(a.accept(this)); tiposUsuario.add(tipoUsuarioDe(a)); }
+
+        List<ConstructorDeclNode> constructores = contexto.constructoresPorClase.getOrDefault(padre, List.of());
+        ConstructorDeclNode elegido = null;
+        boolean coincide = constructores.isEmpty() && argumentos.isEmpty();
+        for (ConstructorDeclNode ctor : constructores) {
+            if (coincideFirma(ctor.parametros, tipos, tiposUsuario, linea)) { elegido = ctor; coincide = true; break; }
+        }
+        if (!coincide) {
+            String mensaje = explicita
+                    ? "Ningún constructor de la superclase '" + padre + "' coincide con los " + argumentos.size()
+                      + " argumento(s) de super(...)"
+                    : "El constructor de '" + hija + "' llama implícitamente a super(), pero la superclase '" + padre
+                      + "' no tiene un constructor sin parámetros: llama a super(...) como primera sentencia";
+            throw new SemanticException(mensaje + " (línea " + linea + ")", linea, columna);
+        }
+        if (elegido != null) verificarAcceso("constructor", padre, padre, elegido.visibilidad, linea, columna);
+    }
+
     // ================= ENCAPSULAMIENTO (fase 2) =================
 
     /** Atributo encontrado en la cadena de herencia: el nodo y la clase que realmente lo declara. */
     private record AtributoDeclarado(FieldNode nodo, String claseDeclarante) {}
 
-    /** Busca el atributo en la clase y luego en sus superclases (hoy la cadena es solo la propia clase). */
+    /** Busca el atributo en la clase y luego en sus superclases (la cadena de herencia, de la propia clase hacia la raíz). */
     private AtributoDeclarado buscarAtributo(String clase, String nombre) {
         int guarda = 0;
         for (String c = clase; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
@@ -251,7 +406,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         return null;
     }
 
-    /** ¿'hija' es 'ancestro' o desciende de él? (usa el mapa de herencia, vacío mientras no haya 'extends'). */
+    /** ¿'hija' es 'ancestro' o desciende de él? (usa el mapa de herencia que llena registrarSuperclase). */
     private boolean esSubclaseDe(String hija, String ancestro) {
         int guarda = 0;
         for (String c = hija; c != null && guarda++ < 100; c = contexto.superclases.get(c)) {
@@ -276,7 +431,8 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         return switch (visibilidad) {
             case PUBLIC -> true;
             case PRIVATE -> claseActual != null && claseActual.equals(claseDeclarante);
-            case DEFAULT -> mismoPaquete(claseDeclarante);
+            // Aclaración de la auxiliar: sin modificador (default) se trata como private.
+            case DEFAULT -> claseActual != null && claseActual.equals(claseDeclarante);
             case PROTECTED -> mismoPaquete(claseDeclarante)
                     || (claseActual != null && esSubclaseDe(claseActual, claseDeclarante));
         };
@@ -293,6 +449,11 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
      */
     private void verificarAcceso(String tipoMiembro, String nombre, String claseDeclarante,
                                  Visibilidad visibilidad, ASTNode donde) {
+        verificarAcceso(tipoMiembro, nombre, claseDeclarante, visibilidad, donde.getLine(), donde.getColumn());
+    }
+
+    private void verificarAcceso(String tipoMiembro, String nombre, String claseDeclarante,
+                                 Visibilidad visibilidad, int linea, int columna) {
         if (puedeAcceder(visibilidad, claseDeclarante)) return;
 
         String origen = claseActual != null
@@ -303,14 +464,13 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             case PROTECTED -> "solo es accesible desde el paquete "
                     + nombrePaquete(contexto.paquetesPorClase.getOrDefault(claseDeclarante, ""))
                     + " o desde subclases de '" + claseDeclarante + "'";
-            default -> "solo es accesible desde clases del paquete "
-                    + nombrePaquete(contexto.paquetesPorClase.getOrDefault(claseDeclarante, ""));
+            default -> "se trata como private: solo es accesible dentro de la clase '" + claseDeclarante + "'";
         };
         String nombreCompleto = tipoMiembro.equals("constructor") ? "de '" + claseDeclarante + "'"
                 : "'" + nombre + "' de '" + claseDeclarante + "'";
         throw new SemanticException("No se puede acceder al " + tipoMiembro + " " + nombreCompleto
                 + " desde " + origen + ": es " + visibilidad.etiqueta() + " y " + regla
-                + " (línea " + donde.getLine() + ")", donde.getLine(), donde.getColumn());
+                + " (línea " + linea + ")", linea, columna);
     }
 
     // ================= DECLARACIONES =================
@@ -413,6 +573,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         }
         contexto.classes.put(n.nombre, n);
         contexto.paquetesPorClase.put(n.nombre, paqueteActual);
+        if (n.superclase != null) registrarSuperclase(n);
 
         Map<String, ResolvedType> layout = new LinkedHashMap<>();
         Map<String, List<Integer>> dimensiones = new LinkedHashMap<>();
@@ -442,7 +603,18 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         }
         contexto.sobrecargasPorClase.put(n.nombre, sobrecargas);
         contexto.constructoresPorClase.put(n.nombre, n.constructores);
+        for (FunctionDeclNode m : n.metodos) validarSobrescritura(n, m);
 
+        if (n.constructores.isEmpty() && n.superclase != null) {
+            // constructor por defecto de una clase hija: llama a super() del padre
+            String claseAnterior = claseActual;
+            claseActual = n.nombre;
+            try {
+                validarLlamadaAlPadre(n.nombre, List.of(), false, n.getLine(), n.getColumn());
+            } finally {
+                claseActual = claseAnterior;
+            }
+        }
         for (var ctor : n.constructores) ctor.accept(this);
         for (var m : n.metodos) m.accept(this);
         return Type.VOID;
@@ -455,13 +627,16 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         tipoRetornoFuncionActual = resolverTipoDeclarado(n.tipoRetorno, n.getLine());
 
         abrirScope();
-        if (n.esMetodo && n.claseDuena != null) {
+        boolean esMetodoDeClase = n.esMetodo && n.claseDuena != null;
+        if (esMetodoDeClase) {
             claseActual = n.claseDuena;
             scopeActual.declarar("this", Type.CLASE, n.claseDuena, n.getLine(), n.getColumn());
             precargarAtributosDeClase(n.claseDuena);
+            abrirScope();   // parámetros y variables locales en un ámbito propio: pueden tapar a un atributo (this.x = x)
         }
         for (ParamNode p : n.parametros) p.accept(this);
         for (Statement s : n.cuerpo) s.accept(this);
+        if (esMetodoDeClase) cerrarScope();
         cerrarScope();
 
         tipoRetornoFuncionActual = retornoAnterior;
@@ -477,8 +652,19 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         abrirScope();
         scopeActual.declarar("this", Type.CLASE, n.claseDuena, n.getLine(), n.getColumn());
         precargarAtributosDeClase(n.claseDuena);
+        abrirScope();       // parámetros y locales en un ámbito propio: pueden tapar a un atributo (this.x = x)
         for (ParamNode p : n.parametros) p.accept(this);
+
+        boolean superExplicito = n.argumentosSuper != null;
+        if (superExplicito && !contexto.superclases.containsKey(n.claseDuena)) {
+            throw new SemanticException("super(...) solo puede usarse en una clase que hereda de otra ('extends') (línea "
+                    + n.lineaSuper + ")", n.lineaSuper, n.columnaSuper);
+        }
+        validarLlamadaAlPadre(n.claseDuena, superExplicito ? n.argumentosSuper : List.of(), superExplicito,
+                superExplicito ? n.lineaSuper : n.getLine(), superExplicito ? n.columnaSuper : n.getColumn());
+
         for (Statement s : n.cuerpo) s.accept(this);
+        cerrarScope();
         cerrarScope();
 
         claseActual = claseAnterior;
@@ -564,7 +750,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             }
 
             // Validar compatibilidad entre el tipo declarado y la expresión asignada
-            if (!TypeCoercionTable.compatibles(rt.tipo(), rt.tipoUsuario(), tipoInit, tipoUsuarioInit)) {
+            if (!compatibles(rt.tipo(), rt.tipoUsuario(), tipoInit, tipoUsuarioInit)) {
                 throw new SemanticException("No se puede asignar " + etiquetaTipo(tipoInit, tipoUsuarioInit)
                         + " a " + rt.etiqueta() + " en la variable '" + n.nombre
                         + "' (línea " + n.getLine() + ")");
@@ -639,7 +825,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             tipoUsuarioValor = null;
         }
 
-        if (!TypeCoercionTable.compatibles(tipoDestino, tipoUsuarioDestino, tipoValor, tipoUsuarioValor)) {
+        if (!compatibles(tipoDestino, tipoUsuarioDestino, tipoValor, tipoUsuarioValor)) {
             throw new SemanticException("Asignación incompatible: " + etiquetaTipo(tipoValor, tipoUsuarioValor)
                     + " a " + etiquetaTipo(tipoDestino, tipoUsuarioDestino) + " (línea " + n.getLine() + ")");
         }
@@ -756,7 +942,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         String tipoUsuarioValor = n.valor == null ? null : tipoUsuarioDe(n.valor);
 
         if (tipoRetornoFuncionActual != null) {
-            if (!TypeCoercionTable.compatibles(tipoRetornoFuncionActual.tipo(), tipoRetornoFuncionActual.tipoUsuario(), tipoValor, tipoUsuarioValor)) {
+            if (!compatibles(tipoRetornoFuncionActual.tipo(), tipoRetornoFuncionActual.tipoUsuario(), tipoValor, tipoUsuarioValor)) {
                 throw new SemanticException("La función debe retornar " + tipoRetornoFuncionActual.etiqueta()
                         + " pero se retornó " + etiquetaTipo(tipoValor, tipoUsuarioValor) + " (línea " + n.getLine() + ")");
             }
@@ -821,7 +1007,9 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                     String tuIzq = tipoUsuarioDe(n.izquierda);
                     String tuDer = tipoUsuarioDe(n.derecha);
                     boolean valido = (izqEsNulo && derEsObjeto) || (derEsNulo && izqEsObjeto)
-                            || (izqEsObjeto && derEsObjeto && izq == der && Objects.equals(tuIzq, tuDer));
+                            || (izqEsObjeto && derEsObjeto && izq == der && (Objects.equals(tuIzq, tuDer)
+                                || (tuIzq != null && tuDer != null
+                                    && (esSubclaseDe(tuIzq, tuDer) || esSubclaseDe(tuDer, tuIzq)))));
                     if (!valido) {
                         throw new SemanticException("No se puede comparar " + etiquetaTipo(izq, tuIzq)
                                 + " con " + etiquetaTipo(der, tuDer) + " (línea " + n.getLine() + ")");
@@ -917,6 +1105,13 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
     @Override
     public Type visit(IdentifierNode n) {
         Symbol s = scopeActual.resolver(n.nombre);
+        if (s == null && claseActual != null) {
+            // ¿es un atributo de una superclase al que no se puede acceder (private del padre, otro paquete...)?
+            AtributoDeclarado heredado = buscarAtributo(claseActual, n.nombre);
+            if (heredado != null) {
+                verificarAcceso("atributo", n.nombre, heredado.claseDeclarante(), heredado.nodo().visibilidad, n);
+            }
+        }
         if (s == null) throw new SemanticException("Variable no declarada: " + n.nombre
                 + " (línea " + n.getLine() + ")");
         n.tipoResuelto = s.tipo;
@@ -993,9 +1188,17 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                 if (nombreMetodo != null && tipoUsuarioActual != null
                         && contexto.metodosPorClase.containsKey(tipoUsuarioActual)) {
 
-                    FunctionDeclNode metodo = resolverMetodo(tipoUsuarioActual, nombreMetodo.nombreCampo, call, n.getLine());
+                    String claseDeBusqueda = tipoUsuarioActual;
+                    if (call.esSuper) {
+                        claseDeBusqueda = contexto.superclases.get(claseActual);
+                        if (claseDeBusqueda == null) {
+                            throw new SemanticException("super solo puede usarse dentro de una clase que hereda de otra "
+                                    + "('extends') (línea " + n.getLine() + ")", n.getLine(), n.getColumn());
+                        }
+                    }
+                    FunctionDeclNode metodo = resolverMetodo(claseDeBusqueda, nombreMetodo.nombreCampo, call, n.getLine());
                     if (metodo == null) {
-                        throw new SemanticException("La clase '" + tipoUsuarioActual + "' no tiene un método '"
+                        throw new SemanticException("La clase '" + claseDeBusqueda + "' no tiene un método '"
                                 + nombreMetodo.nombreCampo + "' (línea " + n.getLine() + ")");
                     }
 
@@ -1073,7 +1276,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         if (parametros.size() != tiposArgs.size()) return false;
         for (int i = 0; i < parametros.size(); i++) {
             ResolvedType rtParam = resolverTipoDeclarado(parametros.get(i).tipo, linea);
-            if (!TypeCoercionTable.compatibles(rtParam.tipo(), rtParam.tipoUsuario(), tiposArgs.get(i), tiposUsuarioArgs.get(i))) {
+            if (!compatibles(rtParam.tipo(), rtParam.tipoUsuario(), tiposArgs.get(i), tiposUsuarioArgs.get(i))) {
                 return false;
             }
         }
@@ -1152,7 +1355,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                 if (tipoUsuarioValor == null) tipoUsuarioValor = tipoCampo.tipoUsuario();
             }
 
-            if (!TypeCoercionTable.compatibles(tipoCampo.tipo(), tipoCampo.tipoUsuario(), tipoValor, tipoUsuarioValor)) {
+            if (!compatibles(tipoCampo.tipo(), tipoCampo.tipoUsuario(), tipoValor, tipoUsuarioValor)) {
                 throw new SemanticException("El campo '" + nombreCampo + "' de '" + nombreEstructura
                         + "' espera " + etiquetaTipo(tipoCampo.tipo(), tipoCampo.tipoUsuario()) + ", se dio "
                         + etiquetaTipo(tipoValor, tipoUsuarioValor) + " (línea " + n.getLine() + ")");
@@ -1162,4 +1365,4 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         n.tipoResuelto = Type.ESTRUCTURA;
         return Type.ESTRUCTURA;
     }
-}
+}
