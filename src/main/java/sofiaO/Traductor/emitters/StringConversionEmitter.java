@@ -19,4 +19,4 @@ public class StringConversionEmitter implements InstructionEmitter {
     public String emitir(Quadruple q, EmissionContext ctx) {
         return "    " + q.result + " = c3d_" + operacion + "(" + ctx.resolverAtributo(q.arg1) + ");\n";
     }
-}
+}

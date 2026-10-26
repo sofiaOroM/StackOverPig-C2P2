@@ -11,4 +11,4 @@ public class ConcatEmitter implements InstructionEmitter {
         return "    " + q.result + " = c3d_concat("
                 + ctx.resolverAtributo(q.arg1) + ", " + ctx.resolverAtributo(q.arg2) + ");\n";
     }
-}
+}

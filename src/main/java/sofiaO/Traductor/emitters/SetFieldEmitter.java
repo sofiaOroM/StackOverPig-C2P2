@@ -25,4 +25,4 @@ public class SetFieldEmitter implements InstructionEmitter {
                 ? "    strcpy(" + destino + ", " + q.result + ");\n"
                 : "    " + destino + " = " + q.result + ";\n";
     }
-}
+}

@@ -67,7 +67,8 @@ public class CallEmitter implements RvInstructionEmitter {
             }
         }
 
-        int slot = indiceVirtual(f, fname);
+        // super.metodo() se marca como llamada directa: va a esa versión, no a la del objeto en tiempo de ejecución
+        int slot = Quadruple.LLAMADA_DIRECTA.equals(q.arg2) ? -1 : indiceVirtual(f, fname);
         if (slot >= 0) {
             f.comprobarNulo("a0");              // a0 = receptor (this)
             f.ins("lw t0, 0(a0)                # vtable del objeto");
