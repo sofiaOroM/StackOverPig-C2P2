@@ -21,11 +21,11 @@ public enum ModoResaltado {
             "//", "/*", "*/", false, true)),
 
     ZETARIANO(new Reglas(
-            Set.of("public", "private", "protected", "class", "void", "new", "if", "else", "switch", "case", "default", "for",
+            Set.of("public", "private", "protected", "class", "extends", "super", "this", "void", "new", "if", "else", "switch", "case", "default", "for",
                     "while", "do", "break", "continue", "return"),
             Set.of("int", "double", "char", "boolean", "String"),
             Set.of("true", "false", "null"),
-            Set.of(), List.of(),
+            Set.of(), List.of("@Override"),
             "//", "/*", "*/", false, true)),
 
     PIG(new Reglas(
