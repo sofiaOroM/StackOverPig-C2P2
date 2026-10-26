@@ -101,6 +101,12 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
     }
 
     @Override
+    public void emitirLlamadaDirecta(String funcion, String result, Type tipo,
+                                     List<String> extra, List<Type> tiposExtra) {
+        cuartetas.add(new Quadruple("call", funcion, Quadruple.LLAMADA_DIRECTA, result, tipo, extra, tiposExtra));
+    }
+
+    @Override
     public void emitLabel(String etiqueta) {
         cuartetas.add(new Quadruple("label", null, null, etiqueta, Type.VOID));
     }
@@ -142,7 +148,7 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
     public Type typeOfVariable(String nombre) {
         boolean esAtributo = atributosDeClaseActual.contains(nombre) && !localesDelMetodoActual.contains(nombre);
         if (esAtributo && contexto != null && claseActual != null) {
-            var layout = contexto.layoutsClases.get(claseActual);
+            var layout = contexto.layoutCompletoDeClase(claseActual);   // propios + heredados
             if (layout != null && layout.containsKey(nombre)) return layout.get(nombre).tipo();
         }
         return typeOfPlace(nombre);
@@ -157,7 +163,7 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
     @Override
     public ResolvedType typeOfField(String tipoUsr, String campo) {
         if (contexto == null || tipoUsr == null) return null;
-        var layout = contexto.layoutsClases.get(tipoUsr);
+        var layout = contexto.layoutCompletoDeClase(tipoUsr);   // propios + heredados
         if (layout == null) layout = contexto.layoutsEstructuras.get(tipoUsr);
         return layout == null ? null : layout.get(campo);
     }
@@ -295,4 +301,4 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
 
     @Override
     public Map<String, String> placeUserTypes() { return tiposUsuarioDeLugares; }
-}
+}

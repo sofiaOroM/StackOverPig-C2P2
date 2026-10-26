@@ -23,6 +23,9 @@ import java.util.List;
  */
 public class Quadruple {
 
+    /** Valor de arg2 en un 'call' que no pasa por la vtable (super.metodo()). */
+    public static final String LLAMADA_DIRECTA = "directa";
+
     public String op;               // "=", "+", "call", "if_false", "goto", "label", "print", "halt"...
     public String arg1;
     public String arg2;
