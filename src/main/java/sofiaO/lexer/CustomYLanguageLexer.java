@@ -77,4 +77,4 @@ public class CustomYLanguageLexer extends YLanguageLexer {
         t.setChannel(Token.DEFAULT_CHANNEL);
         return t;
     }
-}
+}

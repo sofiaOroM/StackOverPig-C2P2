@@ -516,4 +516,4 @@ public class YLanguageASTBuilder extends YLanguageBaseVisitor<ASTNode> {
         return new LiteralNode(ctx.getText(),
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
-}
+}

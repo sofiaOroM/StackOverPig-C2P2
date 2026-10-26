@@ -405,4 +405,4 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
         return new LiteralNode(ctx.getText(),
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
-}
+}
