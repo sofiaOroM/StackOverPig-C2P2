@@ -74,4 +74,4 @@ public class TypeCoercionTable {
     private static boolean esNumericoOCaracter(Type t) {
         return t == Type.ENTERO || t == Type.FLOTANTE || t == Type.CARACTER;
     }
-}
+}

@@ -21,4 +21,4 @@ public class Symbol {
         this.line = line;
         this.column = column;
     }
-}
+}

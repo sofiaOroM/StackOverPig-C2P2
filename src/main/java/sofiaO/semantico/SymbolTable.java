@@ -46,4 +46,4 @@ public class SymbolTable {
     public SymbolTable getScopePadre() {
         return scopePadre;
     }
-}
+}

@@ -43,11 +43,39 @@ public class ProgramContext {
     /** nombreClase -> paquete donde está declarada (carpeta relativa, "" = paquete por defecto). Encapsulamiento. */
     public final Map<String, String> paquetesPorClase = new HashMap<>();
 
-    /** clase hija -> clase padre (herencia, fase 2). Vacío hasta que el semántico registre los 'extends'. */
+    /** clase hija -> clase padre (herencia). Lo llena SemanticAnalyzer.registrarSuperclase al leer un 'extends'. */
     public final Map<String, String> superclases = new HashMap<>();
 
     /** nombreClase -> lista de constructores (puede haber varios por sobrecarga) */
     public final Map<String, List<ConstructorDeclNode>> constructoresPorClase = new HashMap<>();
+
+    /** Cadena de herencia de la clase, de la raíz (el ancestro más lejano) hasta la propia clase. */
+    public List<String> cadenaDeHerencia(String clase) {
+        java.util.ArrayDeque<String> cadena = new java.util.ArrayDeque<>();
+        int guarda = 0;
+        for (String c = clase; c != null && guarda++ < 100; c = superclases.get(c)) cadena.addFirst(c);
+        return new java.util.ArrayList<>(cadena);
+    }
+
+    /** Atributos de la clase INCLUIDOS los heredados (los del padre primero). layoutsClases solo guarda los propios. */
+    public Map<String, ResolvedType> layoutCompletoDeClase(String clase) {
+        if (!layoutsClases.containsKey(clase)) return null;
+        Map<String, ResolvedType> completo = new LinkedHashMap<>();
+        for (String c : cadenaDeHerencia(clase)) {
+            Map<String, ResolvedType> propio = layoutsClases.get(c);
+            if (propio != null) completo.putAll(propio);
+        }
+        return completo;
+    }
+
+    public Map<String, List<Integer>> dimensionesCompletasDeClase(String clase) {
+        Map<String, List<Integer>> completo = new LinkedHashMap<>();
+        for (String c : cadenaDeHerencia(clase)) {
+            Map<String, List<Integer>> propio = dimensionesCamposClases.get(c);
+            if (propio != null) completo.putAll(propio);
+        }
+        return completo;
+    }
 
     public Map<String, Map<String, ResolvedType>> obtenerLayoutsParaCEmitter() {
         Map<String, Map<String, ResolvedType>> resultado = new LinkedHashMap<>();
@@ -59,8 +87,9 @@ public class ProgramContext {
         }
 
         if (this.layoutsClases != null) {
-            for (var entry : this.layoutsClases.entrySet()) {
-                resultado.put(entry.getKey(), new LinkedHashMap<>(entry.getValue()));
+            // En C cada clase es un struct "plano": lleva también los atributos heredados (los del padre primero).
+            for (String clase : this.layoutsClases.keySet()) {
+                resultado.put(clase, new LinkedHashMap<>(layoutCompletoDeClase(clase)));
             }
         }
 
@@ -77,8 +106,9 @@ public class ProgramContext {
         }
 
         if (this.dimensionesCamposClases != null) {
-            for (var entry : this.dimensionesCamposClases.entrySet()) {
-                resultado.put(entry.getKey(), new LinkedHashMap<>(entry.getValue()));
+            for (String clase : this.layoutsClases.keySet()) {
+                Map<String, List<Integer>> dims = dimensionesCompletasDeClase(clase);
+                if (!dims.isEmpty()) resultado.put(clase, dims);
             }
         }
 
