@@ -97,6 +97,10 @@ public class ServicioCompilacion {
         }
         if (!r.errores.isEmpty()) return ordenar(r);
 
+        // 2b. Herencia: cargar los .z de las superclases que no se importaron y poner cada padre antes que sus hijas.
+        resolverHerencia(archivosZ, archivoPig, carpetaBase, fuente, yaCargados, r);
+        if (!r.errores.isEmpty()) return ordenar(r);
+
         // 3. Análisis semántico. Primero lo que se importa (.y, luego .z) y al final el .pig.
         Compilador compilador = new Compilador();
         try {
@@ -152,11 +156,31 @@ public class ServicioCompilacion {
         if (lenguaje.get() == Lenguaje.ZETARIANO) validarNombreDeClase(archivo, ast, r.errores);
         if (!r.errores.isEmpty()) return ordenar(r);
 
+        // Un .z que hereda de otra clase necesita también el .z de su superclase (y las de más arriba).
+        List<ArchivoAnalizado> archivosZ = new ArrayList<>();
+        if (lenguaje.get() == Lenguaje.ZETARIANO) {
+            archivosZ.add(new ArchivoAnalizado(archivo, Lenguaje.ZETARIANO, ast));
+            Set<Path> yaCargados = new HashSet<>();
+            yaCargados.add(archivo.toAbsolutePath().normalize());
+            Path carpetaBase = raiz != null ? raiz : archivo.toAbsolutePath().getParent();
+            resolverHerencia(archivosZ, archivo, carpetaBase, fuente, yaCargados, r);
+            if (!r.errores.isEmpty()) return ordenar(r);
+        }
+
         Compilador compilador = new Compilador();
+        List<ProgramNode> aGenerar = new ArrayList<>();
         try {
-            if (lenguaje.get() == Lenguaje.ZETARIANO) compilador.cargarClase(ast);
-            else compilador.cargarEstructurasYFunciones(ast);
-            recogerErroresSemanticos(compilador, archivo, r.errores);
+            if (lenguaje.get() == Lenguaje.ZETARIANO) {
+                for (ArchivoAnalizado z : archivosZ) {
+                    compilador.cargarClase(z.ast);
+                    recogerErroresSemanticos(compilador, z.archivo, r.errores);
+                    aGenerar.add(z.ast);
+                }
+            } else {
+                compilador.cargarEstructurasYFunciones(ast);
+                recogerErroresSemanticos(compilador, archivo, r.errores);
+                aGenerar.add(ast);
+            }
         } catch (SemanticException e) {
             r.errores.add(desdeExcepcion(e, archivo));
         } catch (RuntimeException e) {
@@ -164,7 +188,7 @@ public class ServicioCompilacion {
         }
         if (!r.errores.isEmpty()) return ordenar(r);
 
-        generarCodigo(r, compilador, List.of(ast), archivo);
+        generarCodigo(r, compilador, aGenerar, archivo);
         return ordenar(r);
     }
 
@@ -344,6 +368,90 @@ public class ServicioCompilacion {
         String detalle = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
         return new ErrorCompilador(ErrorCompilador.Tipo.INTERNO,
                 "Error inesperado del compilador: " + detalle, archivo, 1, 0, 0);
+    }
+
+    // ---------------- herencia ----------------
+
+    private static ClassDeclNode claseDe(ArchivoAnalizado z) {
+        for (Declaration d : z.ast.declaraciones) if (d instanceof ClassDeclNode c) return c;
+        return null;
+    }
+
+    /**
+     * Prepara las clases .z para el análisis de herencia:
+     *  1) si una clase hereda de otra cuyo .z no se importó, lo busca en la carpeta de trabajo por su nombre
+     *     (Padre.z) y lo carga también, y así hacia arriba;
+     *  2) reordena la lista para que cada superclase vaya ANTES que sus hijas (el semántico las necesita en ese orden);
+     *  3) detecta la herencia circular.
+     * Modifica 'archivosZ' en su sitio. Los problemas se agregan a 'r.errores'.
+     */
+    private void resolverHerencia(List<ArchivoAnalizado> archivosZ, Path archivoOrigen, Path carpetaBase,
+                                  FuenteArchivos fuente, Set<Path> yaCargados, ResultadoCompilacion r) {
+        Set<String> nombres = new HashSet<>();
+        for (ArchivoAnalizado z : archivosZ) {
+            ClassDeclNode c = claseDe(z);
+            if (c != null) nombres.add(c.nombre);
+        }
+
+        for (int i = 0; i < archivosZ.size(); i++) {           // la lista puede crecer mientras se recorre
+            ArchivoAnalizado hija = archivosZ.get(i);
+            ClassDeclNode clase = claseDe(hija);
+            if (clase == null || clase.superclase == null || clase.superclase.equals(clase.nombre)
+                    || nombres.contains(clase.superclase)) continue;
+
+            Path padre = resolverImport(clase.superclase + ".z", archivoOrigen, carpetaBase);
+            if (padre == null || !yaCargados.add(padre.toAbsolutePath().normalize())) continue;   // el semántico avisa
+
+            r.archivos.add(padre);
+            ProgramNode ast = leerYParsear(padre, Lenguaje.ZETARIANO, fuente, r.errores);
+            if (ast == null) continue;
+            ast.paquete = calcularPaquete(padre, carpetaBase);
+            validarNombreDeClase(padre, ast, r.errores);
+            ArchivoAnalizado cargado = new ArchivoAnalizado(padre, Lenguaje.ZETARIANO, ast);
+            archivosZ.add(cargado);
+            ClassDeclNode nueva = claseDe(cargado);
+            if (nueva != null) nombres.add(nueva.nombre);
+        }
+        if (!r.errores.isEmpty()) return;
+
+        Map<String, ArchivoAnalizado> porClase = new LinkedHashMap<>();
+        for (ArchivoAnalizado z : archivosZ) {
+            ClassDeclNode c = claseDe(z);
+            if (c != null) porClase.putIfAbsent(c.nombre, z);
+        }
+        List<ArchivoAnalizado> ordenadas = new ArrayList<>();
+        Set<String> colocadas = new HashSet<>();
+        for (ArchivoAnalizado z : archivosZ) {
+            ClassDeclNode c = claseDe(z);
+            if (c == null) { ordenadas.add(z); continue; }
+            colocarConSusAncestros(c.nombre, porClase, colocadas, new ArrayList<>(), ordenadas, r);
+        }
+        archivosZ.clear();
+        archivosZ.addAll(ordenadas);
+    }
+
+    private void colocarConSusAncestros(String nombre, Map<String, ArchivoAnalizado> porClase, Set<String> colocadas,
+                                        List<String> camino, List<ArchivoAnalizado> ordenadas, ResultadoCompilacion r) {
+        if (colocadas.contains(nombre)) return;
+        ArchivoAnalizado z = porClase.get(nombre);
+        if (z == null) return;
+        if (camino.contains(nombre)) {
+            ClassDeclNode c = claseDe(z);
+            List<String> ciclo = new ArrayList<>(camino.subList(camino.indexOf(nombre), camino.size()));
+            ciclo.add(nombre);
+            r.errores.add(new ErrorCompilador(ErrorCompilador.Tipo.SEMANTICO,
+                    "Herencia circular entre clases: " + String.join(" -> ", ciclo) + ".",
+                    z.archivo, c.lineaSuperclase > 0 ? c.lineaSuperclase : c.getLine(), c.columnaSuperclase, 0));
+            colocadas.add(nombre);
+            return;
+        }
+        camino.add(nombre);
+        ClassDeclNode clase = claseDe(z);
+        if (clase != null && clase.superclase != null) {
+            colocarConSusAncestros(clase.superclase, porClase, colocadas, camino, ordenadas, r);
+        }
+        camino.remove(camino.size() - 1);
+        if (colocadas.add(nombre)) ordenadas.add(z);
     }
 
     // ---------------- paquetes (encapsulamiento) ----------------

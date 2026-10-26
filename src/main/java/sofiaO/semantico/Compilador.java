@@ -40,4 +40,4 @@ public class Compilador {
 
     public SemanticAnalyzer getAnalizador() { return analizador; }
 
-}
+}
