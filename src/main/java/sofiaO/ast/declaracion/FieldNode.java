@@ -13,6 +13,8 @@ public class FieldNode extends BaseNode {
     public List<Integer> dimensionesArreglo; // vacío si no es arreglo (ej. miArray[10] -> [10])
     /** Encapsulamiento (solo Zetariano). Los campos de estructuras Y? son siempre PUBLIC. */
     public Visibilidad visibilidad = Visibilidad.PUBLIC;
+    /** Valor inicial del atributo (int[] filas = new int[9];). El builder lo traslada al inicio de cada constructor. */
+    public sofiaO.ast.Expression valorInicial;
 
     public FieldNode(String tipo, String nombre, List<Integer> dimensionesArreglo, int line, int column) {
         super(line, column);

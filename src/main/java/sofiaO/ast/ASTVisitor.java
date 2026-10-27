@@ -49,4 +49,5 @@ public interface ASTVisitor<T> {
     T visit(NewObjectNode n);
     T visit(ArrayLiteralNode n);
     T visit(NewArrayNode n);
+    T visit(IncDecExprNode n);
 }
