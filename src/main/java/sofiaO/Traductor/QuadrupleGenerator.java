@@ -86,6 +86,7 @@ public class QuadrupleGenerator implements ASTVisitor<String>, GeneratorContext 
     @Override public String visit(NewObjectNode n)      { return expressions.visit(n); }
     @Override public String visit(ArrayLiteralNode n)   { return expressions.visit(n); }
     @Override public String visit(NewArrayNode n)       { return expressions.visit(n); }
+    @Override public String visit(IncDecExprNode n)     { return expressions.visit(n); }
 
     //  GeneratorContext: el estado real vive aquí; los colaboradores solo lo piden.
 

@@ -281,6 +281,20 @@ public class ExpressionGenerator {
     }
 
     /** new int[n] / new boolean[f][c]: total = producto de los tamaños; las dimensiones viajan en la cuarteta. */
+    /** ++k / k++ como expresión: prefijo -> actualiza y devuelve el nuevo; postfijo -> guarda el anterior y actualiza. */
+    public String visit(IncDecExprNode n) {
+        Type tipo = n.tipoResuelto != Type.ERROR ? n.tipoResuelto : Type.ENTERO;
+        if (n.prefijo) {
+            ctx.generate((ASTNode) n.actualizacion);
+            return ctx.generate(n.objetivo);
+        }
+        String actual = ctx.generate(n.objetivo);
+        String anterior = ctx.newTemp(tipo);
+        ctx.emit("=", actual, null, anterior, tipo);
+        ctx.generate((ASTNode) n.actualizacion);
+        return anterior;
+    }
+
     public String visit(NewArrayNode n) {
         Type tipo = n.tipoResuelto;
         List<String> dims = new ArrayList<>();
