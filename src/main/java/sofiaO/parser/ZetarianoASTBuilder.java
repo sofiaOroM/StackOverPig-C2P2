@@ -46,6 +46,25 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
             }
         }
 
+        // Valores iniciales de atributos (int[] filas = new int[9];): se ejecutan al inicio de cada constructor,
+        // después de la llamada al constructor del padre y antes del cuerpo (como en Java).
+        List<Statement> inicializadores = new ArrayList<>();
+        for (FieldNode campo : atributos) {
+            if (campo.valorInicial == null) continue;
+            Expression destino = new PostfixExprNode(new IdentifierNode("this", campo.getLine(), campo.getColumn()),
+                    new ArrayList<>(List.of(new FieldSuffix(campo.nombre))), campo.getLine(), campo.getColumn());
+            inicializadores.add(new AssignNode(destino, "=", campo.valorInicial, campo.getLine(), campo.getColumn()));
+        }
+        if (!inicializadores.isEmpty()) {
+            if (constructores.isEmpty()) {
+                ConstructorDeclNode porDefecto = new ConstructorDeclNode(nombreClase, new ArrayList<>(),
+                        new ArrayList<>(), ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+                porDefecto.visibilidad = Visibilidad.PUBLIC;
+                constructores.add(porDefecto);
+            }
+            for (ConstructorDeclNode c : constructores) c.cuerpo.addAll(0, inicializadores);
+        }
+
         ClassDeclNode clase = new ClassDeclNode(nombreClase, atributos, constructores, metodos,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
         if (ctx.padre != null) {
@@ -64,6 +83,7 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         FieldNode campo = new FieldNode(tipoBase, ctx.ID().getText(), dimensiones,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
         campo.visibilidad = visibilidadDe(ctx.modificador());
+        if (ctx.valorInicial() != null) campo.valorInicial = (Expression) visit(ctx.valorInicial());
         return campo;
     }
 
@@ -247,6 +267,25 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
         String op = operador.equals("++") ? "+" : "-";
         return new AssignNode(destino, "=",
                 new BinaryExprNode(op, lectura, new LiteralNode("1", line, column), line, column), line, column);
+    }
+
+    @Override
+    public ASTNode visitExprPreIncremento(ZetarianoLanguageParser.ExprPreIncrementoContext ctx) {
+        return incDecComoExpresion(ctx.acceso(), ctx.op.getText(), true, ctx.getStart());
+    }
+
+    @Override
+    public ASTNode visitExprPostIncremento(ZetarianoLanguageParser.ExprPostIncrementoContext ctx) {
+        return incDecComoExpresion(ctx.acceso(), ctx.op.getText(), false, ctx.getStart());
+    }
+
+    /** ++k / k++ usados como expresión: objetivo (lectura) + la actualización equivalente como sentencia. */
+    private ASTNode incDecComoExpresion(ZetarianoLanguageParser.AccesoContext acceso, String operador,
+                                        boolean prefijo, org.antlr.v4.runtime.Token inicio) {
+        int line = inicio.getLine(), column = inicio.getCharPositionInLine();
+        Expression objetivo = (Expression) visit(acceso);
+        Statement actualizacion = (Statement) incrementoSobre(acceso, operador, line, column);
+        return new IncDecExprNode(objetivo, actualizacion, operador, prefijo, line, column);
     }
 
     @Override

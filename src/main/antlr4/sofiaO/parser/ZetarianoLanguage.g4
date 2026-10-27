@@ -30,8 +30,9 @@ modificador
     ;
 
 // private String nombre;   int edad;   (sin modificador = default)
+// Con valor inicial:  private int[] filas = new int[9];   private int vidas = 3;
 atributo
-    : modificador? tipo ID ';'
+    : modificador? tipo ID ('=' valorInicial)? ';'
     ;
 
 // public Persona(String nombreParametro, int edadParametro) { ... }
@@ -234,6 +235,8 @@ expresionPrimaria
     | SUPER '.' ID '(' argumentos? ')'                # exprSuperLlamada   // super.metodo(...): versión del padre
     | NEW ID '(' argumentos? ')'                      # exprNuevoObjeto
     | NEW (INT|DOUBLE|CHAR|BOOLEAN|STRINGKEY|ID) ('[' expresion ']')+ # exprNuevoArreglo
+    | op=('++'|'--') acceso                           # exprPreIncremento   // int a = ++k;
+    | acceso op=('++'|'--')                           # exprPostIncremento  // int b = k++;
     | acceso                                          # exprAcceso
     | literal                                         # exprLiteral
     ;
