@@ -1283,6 +1283,19 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         return true;
     }
 
+    /** ++k / k++ / --k / k-- como expresión: el objetivo debe ser numérico; el tipo de la expresión es el del objetivo. */
+    @Override
+    public Type visit(IncDecExprNode n) {
+        Type t = n.objetivo.accept(this);
+        if (t != Type.ENTERO && t != Type.FLOTANTE) {
+            throw new SemanticException("'" + n.operador + "' requiere un tipo numérico, no " + t
+                    + " (línea " + n.getLine() + ")", n.getLine(), n.getColumn());
+        }
+        n.actualizacion.accept(this);
+        n.tipoResuelto = t;
+        return t;
+    }
+
     @Override
     public Type visit(NewArrayNode n) {
         for (Expression d : n.dimensiones) {
