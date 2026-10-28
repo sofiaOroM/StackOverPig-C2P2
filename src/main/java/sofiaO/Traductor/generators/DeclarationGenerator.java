@@ -104,6 +104,11 @@ public class DeclarationGenerator {
         if (ctx.context() == null) return;
         String padre = ctx.context().superclases.get(clase);
         if (padre == null) return;
+        if (argumentosSuper == null) {   // super() implícito: solo si el padre tiene un constructor sin parámetros
+            var ctoresPadre = ctx.context().constructoresPorClase.get(padre);
+            if (ctoresPadre != null && !ctoresPadre.isEmpty()
+                    && ctoresPadre.stream().noneMatch(c -> c.parametros.isEmpty())) return;
+        }
 
         List<String> args = new ArrayList<>();
         List<Type> tipos = new ArrayList<>();

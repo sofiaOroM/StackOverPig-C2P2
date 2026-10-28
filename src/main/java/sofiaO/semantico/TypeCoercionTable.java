@@ -18,6 +18,7 @@ public class TypeCoercionTable {
             if (origen == Type.NULO) return true; // a un struct/objeto SÍ se le puede asignar null
             return destino == origen && Objects.equals(tipoUsuarioDestino, tipoUsuarioOrigen);
         }
+        if (destino == Type.CADENA && origen == Type.NULO) return true;   // String s = null;
         return compatibles(destino, origen);
     }
 

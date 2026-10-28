@@ -132,7 +132,7 @@ public class ExpressionGenerator {
         String tipoUsrRetorno = null;
         FunctionDeclNode m = cs.metodoResuelto != null ? cs.metodoResuelto : ctx.findMethod(clase, metodo);
         if (m != null) {
-            ResolvedType rt = ctx.resolveTypeText(m.tipoRetorno);
+            ResolvedType rt = ctx.resolveTypeText(m.tipoRetornoBase());
             tipoRetorno = rt.tipo();
             tipoUsrRetorno = rt.tipoUsuario();
         }
@@ -141,7 +141,8 @@ public class ExpressionGenerator {
         // La función se llama con el nombre de la clase que DECLARA el método (puede ser una superclase de 'clase').
         String duena = (m != null && m.claseDuena != null) ? m.claseDuena : clase;
         String nombreFuncion = duena != null ? duena + "_" + (m != null ? m.nombreCodigo() : metodo) : metodo;
-        if (cs.esSuper) {
+        // super.metodo() y los métodos private no se despachan por la vtable (un private no se sobrescribe)
+        if (cs.esSuper || (m != null && m.visibilidad == sofiaO.ast.declaracion.Visibilidad.PRIVATE)) {
             ctx.emitirLlamadaDirecta(nombreFuncion, temp, tipoRetorno, args, tipos);   // super.metodo(): sin vtable
         } else {
             ctx.emitVariadic("call", nombreFuncion, temp, tipoRetorno, args, tipos);   // con vtable: polimorfismo
@@ -231,7 +232,7 @@ public class ExpressionGenerator {
                 String tipoUsrRetorno = null;
                 FunctionDeclNode f = ctx.context() != null ? ctx.context().funciones.get(direccion) : null;
                 if (f != null) {
-                    ResolvedType rt = ctx.resolveTypeText(f.tipoRetorno);
+                    ResolvedType rt = ctx.resolveTypeText(f.tipoRetornoBase());
                     tipoRetorno = rt.tipo();
                     tipoUsrRetorno = rt.tipoUsuario();
                 }
