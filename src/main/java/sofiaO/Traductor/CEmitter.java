@@ -60,11 +60,32 @@ public class CEmitter {
         salida.append("#include <stdlib.h>\n");
         salida.append("#include <string.h>\n\n");
         salida.append("""
+/* Memoria MANUAL: un bloque estatico de 1 MiB y un puntero que solo avanza (sin malloc/calloc/free).
+   Si lo pedido no cabe, el programa avisa y termina en lugar de escribir fuera del bloque. */
+#define C3D_TAM_HEAP (1 << 20)
+static unsigned char c3d_heap[C3D_TAM_HEAP] __attribute__((aligned(8)));
+static size_t c3d_heap_ptr = 0;
+static void* c3d_alloc(size_t n) {
+    n = (n + 7) & ~(size_t) 7;
+    if (n > C3D_TAM_HEAP - c3d_heap_ptr) { fputs("Error: memoria agotada (el heap estatico se lleno)\\n", stderr); exit(1); }
+    void* p = &c3d_heap[c3d_heap_ptr];
+    c3d_heap_ptr += n;
+    return p;   /* el bloque estatico empieza en cero y nunca se reutiliza: llega ya inicializado en 0 */
+}
+
+/* Igualdad de cadenas por CONTENIDO (null solo es igual a null). */
+static int c3d_cmp(const char* a, const char* b) {
+    if (a == b) return 1;
+    if (a == NULL || b == NULL) return 0;
+    return strcmp(a, b) == 0;
+}
+
 /* Arreglos: llevan un encabezado de 32 bytes ANTES de los datos con rank, total y dimensiones
    (datos[-1]=rank, datos[-2]=total, datos[-3]=d0, datos[-4]=d1, datos[-5]=d2). Gracias a eso a[i][j]
    funciona aunque el tamano se conozca solo en tiempo de ejecucion: new int[filas][columnas]. */
 static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) {
-    int* datos = (int*) ((char*) calloc(1, 32 + (size_t) (total > 0 ? total : 0) * elem) + 32);
+    if (total < 0 || d0 < 0 || d1 < 0 || d2 < 0) { fputs("Error: tamano de arreglo negativo\\n", stderr); exit(1); }
+    int* datos = (int*) ((char*) c3d_alloc(32 + (size_t) total * elem) + 32);
     datos[-1] = rank; datos[-2] = total; datos[-3] = d0; datos[-4] = d1; datos[-5] = d2;
     return datos;
 }
@@ -105,30 +126,30 @@ static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) 
         salida.append("    if (a == NULL) a = \"null\";\n");
         salida.append("    if (b == NULL) b = \"null\";\n");
         salida.append("    size_t la = strlen(a), lb = strlen(b);\n");
-        salida.append("    char* r = (char*) malloc(la + lb + 1);\n");
+        salida.append("    char* r = (char*) c3d_alloc(la + lb + 1);\n");
         salida.append("    memcpy(r, a, la);\n");
         salida.append("    memcpy(r + la, b, lb + 1);\n");
         salida.append("    return r;\n");
         salida.append("}\n");
         salida.append("static inline char* c3d_int_to_str(int v) {\n");
-        salida.append("    char* r = (char*) malloc(16);\n");
+        salida.append("    char* r = (char*) c3d_alloc(16);\n");
         salida.append("    snprintf(r, 16, \"%d\", v);\n");
         salida.append("    return r;\n");
         salida.append("}\n");
         salida.append("static inline char* c3d_double_to_str(double v) {\n");
-        salida.append("    char* r = (char*) malloc(32);\n");
+        salida.append("    char* r = (char*) c3d_alloc(32);\n");
         salida.append("    snprintf(r, 32, \"%g\", v);\n");
         salida.append("    return r;\n");
         salida.append("}\n");
         salida.append("static inline char* c3d_char_to_str(char v) {\n");
-        salida.append("    char* r = (char*) malloc(2);\n");
+        salida.append("    char* r = (char*) c3d_alloc(2);\n");
         salida.append("    r[0] = v; r[1] = '\\0';\n");
         salida.append("    return r;\n");
         salida.append("}\n");
         salida.append("static inline char* c3d_bool_to_str(int v) {\n");
         salida.append("    const char* s = v ? \"true\" : \"false\";\n");
         salida.append("    size_t n = strlen(s) + 1;\n");
-        salida.append("    char* r = (char*) malloc(n);\n");
+        salida.append("    char* r = (char*) c3d_alloc(n);\n");
         salida.append("    memcpy(r, s, n);\n");
         salida.append("    return r;\n");
         salida.append("}\n\n");
@@ -207,7 +228,11 @@ static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) 
     /** Tipo de retorno en C de la función que abre la cuarteta 'func'. */
     private String tipoRetornoC(Quadruple funcQ) {
         if (funcQ.result != null && funcQ.result.contains("_init")) return "void";
-        return tipoC(funcQ.arg1);
+        String t = funcQ.arg1;
+        if (t != null && t.contains("[]")) {          // retorno de arreglo: puntero al elemento (int[][] aplanado -> int*)
+            return tipoC(t.replace("[]", "").trim()) + "*";
+        }
+        return tipoC(t);
     }
 
     /** Un parámetro de la firma en C, ej. "Nodo* siguiente1" o "int dato". */
@@ -406,7 +431,7 @@ static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) 
             case "arraydim":    // tamaño de la dimensión k, guardado en el encabezado del arreglo
                 return "    " + q.result + " = ((int*) " + resolverAtributo(q.arg1, funcionActual) + ")[-3 - " + q.arg2 + "];\n";
             case "new": {
-                StringBuilder nuevo = new StringBuilder("    " + q.result + " = (" + q.arg1 + "*) malloc(sizeof(" + q.arg1 + "));\n");
+                StringBuilder nuevo = new StringBuilder("    " + q.result + " = (" + q.arg1 + "*) c3d_alloc(sizeof(" + q.arg1 + "));\n");
                 // Arreglos de tamaño fijo dentro del objeto/estructura: se reservan al crearlo
                 // (los arreglos de estructuras los inicializa el generador).
                 Map<String, ResolvedType> camposNew = layoutsEstructuras.get(q.arg1);
@@ -435,9 +460,16 @@ static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) 
                 if (q.arg2 == null) {
                     return "    " + q.result + " = " + q.op + " " + izq + ";\n";
                 }
+                if ((q.op.equals("==") || q.op.equals("!=")) && tipos.get(q.arg1) == Type.CADENA && tipos.get(q.arg2) == Type.CADENA
+                        || (q.op.equals("==") || q.op.equals("!=")) && (esLitCadena(q.arg1) || esLitCadena(q.arg2))
+                           && !"NULL".equals(q.arg1) && !"NULL".equals(q.arg2) && !"null".equals(q.arg1) && !"null".equals(q.arg2)) {
+                    return "    " + q.result + " = (" + (q.op.equals("==") ? "c3d_cmp" : "!c3d_cmp") + "(" + izq + ", " + der + "));\n";
+                }
                 return "    " + q.result + " = " + izq + " " + q.op + " " + der + ";\n";
         }
     }
+
+    private static boolean esLitCadena(String v) { return v != null && v.startsWith("\""); }
 
     private boolean esArreglo(String identificador) {
         return variablesArreglo.contains(identificador);
@@ -511,7 +543,7 @@ static void* __newarr(size_t elem, int total, int rank, int d0, int d1, int d2) 
     private String traducirRead(Quadruple q) {
         Type tipo = q.tipoResultado;
         if (tipo == Type.CADENA) {
-            return "    " + q.result + " = (char*) malloc(256);\n"
+            return "    " + q.result + " = (char*) c3d_alloc(256);\n"
                     + "    scanf(\"%255s\", " + q.result + ");\n";
         }
         if (tipo == Type.ENTERO || tipo == Type.BOOL) {
