@@ -108,10 +108,13 @@ public class ServicioCompilacion {
                 compilador.cargarEstructurasYFunciones(y.ast);
                 recogerErroresSemanticos(compilador, y.archivo, r.errores);
             }
-            for (ArchivoAnalizado z : archivosZ) {
-                compilador.cargarClase(z.ast);
-                recogerErroresSemanticos(compilador, z.archivo, r.errores);
+            try {
+                compilador.cargarClases(astsDe(archivosZ));
+            } catch (SemanticException e) {
+                r.errores.add(desdeExcepcion(e, archivoDe(archivosZ, compilador, archivoPig)));
             }
+            for (ArchivoAnalizado z : archivosZ) recogerErroresSemanticos(compilador, z.archivo, r.errores);
+            if (!r.errores.isEmpty()) return ordenar(r);
             compilador.compilarPrincipal(astPig);
             recogerErroresSemanticos(compilador, archivoPig, r.errores);
         } catch (SemanticException e) {
@@ -171,8 +174,12 @@ public class ServicioCompilacion {
         List<ProgramNode> aGenerar = new ArrayList<>();
         try {
             if (lenguaje.get() == Lenguaje.ZETARIANO) {
+                try {
+                    compilador.cargarClases(astsDe(archivosZ));
+                } catch (SemanticException e) {
+                    r.errores.add(desdeExcepcion(e, archivoDe(archivosZ, compilador, archivo)));
+                }
                 for (ArchivoAnalizado z : archivosZ) {
-                    compilador.cargarClase(z.ast);
                     recogerErroresSemanticos(compilador, z.archivo, r.errores);
                     aGenerar.add(z.ast);
                 }
@@ -356,6 +363,19 @@ public class ServicioCompilacion {
         List<SemanticException> pendientes = compilador.getAnalizador().getErrores();
         for (SemanticException e : pendientes) destino.add(desdeExcepcion(e, archivo));
         pendientes.clear();
+    }
+
+    private static List<ProgramNode> astsDe(List<ArchivoAnalizado> archivos) {
+        List<ProgramNode> asts = new ArrayList<>();
+        for (ArchivoAnalizado a : archivos) asts.add(a.ast);
+        return asts;
+    }
+
+    /** Archivo .z que se estaba analizando cuando falló la carga de clases. */
+    private static Path archivoDe(List<ArchivoAnalizado> archivos, Compilador compilador, Path porDefecto) {
+        ProgramNode enCurso = compilador.getAnalizador().getProgramaEnCurso();
+        for (ArchivoAnalizado a : archivos) if (a.ast == enCurso) return a.archivo;
+        return porDefecto;
     }
 
     private static ErrorCompilador desdeExcepcion(SemanticException e, Path archivo) {

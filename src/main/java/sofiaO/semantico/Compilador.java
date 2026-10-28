@@ -30,7 +30,12 @@ public class Compilador {
 
     /** Registra la clase de un archivo .z. */
     public void cargarClase(ProgramNode astArchivoZ) {
-        analizador.visit(astArchivoZ);
+        cargarClases(java.util.List.of(astArchivoZ));
+    }
+
+    /** Registra varias clases a la vez (padres antes que hijas): pueden referirse unas a otras. */
+    public void cargarClases(java.util.List<ProgramNode> astsArchivosZ) {
+        analizador.cargarClases(astsArchivosZ);
     }
 
     /** Valida el programa principal (.pig) contra todo lo ya cargado. */

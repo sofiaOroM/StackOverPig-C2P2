@@ -347,9 +347,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
             }
         } else if (heredado != null) {
             if (heredado.visibilidad == Visibilidad.PRIVATE) {
-                throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' coincide con un método "
-                        + "private de la superclase '" + heredado.claseDuena + "': cambia su nombre o sus parámetros "
-                        + "(línea " + linea + ")", linea, columna);
+                return;   // un private no se hereda: el método de la hija es uno nuevo e independiente (válido sin @Override)
             }
             throw new SemanticException("El método '" + firma + "' de '" + clase.nombre + "' sobrescribe a '"
                     + heredado.claseDuena + "." + firma + "': falta la anotación @Override (línea " + linea + ")",
@@ -377,6 +375,9 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         for (ConstructorDeclNode ctor : constructores) {
             if (coincideFirma(ctor.parametros, tipos, tiposUsuario, linea)) { elegido = ctor; coincide = true; break; }
         }
+        // super() implícito y el padre solo tiene constructores con parámetros: se permite (la hija inicializa
+        // los atributos heredados por su cuenta, p. ej. con un método configurar(...)); no se llama al del padre.
+        if (!coincide && !explicita) return;
         if (!coincide) {
             String mensaje = explicita
                     ? "Ningún constructor de la superclase '" + padre + "' coincide con los " + argumentos.size()
@@ -566,13 +567,57 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         return Type.VOID;
     }
 
+    /** Compatibilidad: una sola clase, las tres fases seguidas. */
     @Override
     public Type visit(ClassDeclNode n) {
+        registrarNombreDeClase(n);
+        declararClase(n);
+        analizarCuerposDeClase(n);
+        return Type.VOID;
+    }
+
+    /** Programa (archivo) que se estaba analizando cuando se lanzó el último error. */
+    private ProgramNode programaEnCurso = null;
+    public ProgramNode getProgramaEnCurso() { return programaEnCurso; }
+
+    private void enPaquete(ProgramNode p, Runnable accion) {
+        String anterior = paqueteActual;
+        paqueteActual = p.paquete == null ? "" : p.paquete;
+        programaEnCurso = p;
+        try { accion.run(); } finally { paqueteActual = anterior; }
+    }
+
+    /**
+     * Carga varias clases a la vez para que puedan referirse unas a otras (también hacia adelante y
+     * en ciclos). Fase 1: se registran todos los nombres. Fase 2: se declaran miembros y firmas
+     * (los padres ya vienen antes que sus hijas). Fase 3: se analizan los cuerpos.
+     */
+    public void cargarClases(List<ProgramNode> programas) {
+        for (ProgramNode p : programas) enPaquete(p, () -> {
+            for (var d : p.declaraciones) if (d instanceof ClassDeclNode c) registrarNombreDeClase(c);
+        });
+        for (ProgramNode p : programas) enPaquete(p, () -> {
+            for (var imp : p.imports) imp.accept(this);
+            for (var d : p.declaraciones) if (d instanceof StructDeclNode) d.accept(this);
+            for (var d : p.declaraciones) if (d instanceof ClassDeclNode c) declararClase(c);
+        });
+        for (ProgramNode p : programas) enPaquete(p, () -> {
+            for (var d : p.declaraciones) if (d instanceof ClassDeclNode c) analizarCuerposDeClase(c);
+        });
+    }
+
+    private void registrarNombreDeClase(ClassDeclNode n) {
         if (contexto.funciones.containsKey(n.nombre)) {
             throw new SemanticException("El nombre '" + n.nombre + "' ya está usado por una función importada (línea " + n.getLine() + ")");
         }
         contexto.classes.put(n.nombre, n);
         contexto.paquetesPorClase.put(n.nombre, paqueteActual);
+        // Todas las clases se registran antes de generar código: un parámetro de tipo 'Registro' en una clase que se
+        // genera antes que Registro no debe quedar con tipo ERROR.
+        sofiaO.util.TypeMapper.registrarTipoUsuario(n.nombre, Type.CLASE);
+    }
+
+    private void declararClase(ClassDeclNode n) {
         if (n.superclase != null) registrarSuperclase(n);
 
         Map<String, ResolvedType> layout = new LinkedHashMap<>();
@@ -604,7 +649,9 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         contexto.sobrecargasPorClase.put(n.nombre, sobrecargas);
         contexto.constructoresPorClase.put(n.nombre, n.constructores);
         for (FunctionDeclNode m : n.metodos) validarSobrescritura(n, m);
+    }
 
+    private void analizarCuerposDeClase(ClassDeclNode n) {
         if (n.constructores.isEmpty() && n.superclase != null) {
             // constructor por defecto de una clase hija: llama a super() del padre
             String claseAnterior = claseActual;
@@ -617,14 +664,13 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
         }
         for (var ctor : n.constructores) ctor.accept(this);
         for (var m : n.metodos) m.accept(this);
-        return Type.VOID;
     }
 
     @Override
     public Type visit(FunctionDeclNode n) {
         ResolvedType retornoAnterior = tipoRetornoFuncionActual;
         String claseAnterior = claseActual;
-        tipoRetornoFuncionActual = resolverTipoDeclarado(n.tipoRetorno, n.getLine());
+        tipoRetornoFuncionActual = resolverTipoDeclarado(n.tipoRetornoBase(), n.getLine());
 
         abrirScope();
         boolean esMetodoDeClase = n.esMetodo && n.claseDuena != null;
@@ -1007,6 +1053,8 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                     String tuIzq = tipoUsuarioDe(n.izquierda);
                     String tuDer = tipoUsuarioDe(n.derecha);
                     boolean valido = (izqEsNulo && derEsObjeto) || (derEsNulo && izqEsObjeto)
+                            || (izqEsNulo && der == Type.CADENA) || (derEsNulo && izq == Type.CADENA)   // String es de referencia: se puede comparar con null
+                            || (izqEsNulo && derEsNulo)
                             || (izqEsObjeto && derEsObjeto && izq == der && (Objects.equals(tuIzq, tuDer)
                                 || (tuIzq != null && tuDer != null
                                     && (esSubclaseDe(tuIzq, tuDer) || esSubclaseDe(tuDer, tuIzq)))));
@@ -1204,7 +1252,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
 
                     verificarAcceso("método", metodo.nombre, metodo.claseDuena, metodo.visibilidad, n);
                     validarParametros(metodo.parametros, call.argumentos, tipoUsuarioActual + "." + nombreMetodo.nombreCampo, n.getLine());
-                    ResolvedType rtRetorno = resolverTipoDeclarado(metodo.tipoRetorno, n.getLine());
+                    ResolvedType rtRetorno = resolverTipoDeclarado(metodo.tipoRetornoBase(), n.getLine());
                     tipoActual = rtRetorno.tipo();
                     tipoUsuarioActual = rtRetorno.tipoUsuario();
 
@@ -1213,7 +1261,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                     FunctionDeclNode f = contexto.funciones.get(nombreFuncion);
 
                     validarParametros(f.parametros, call.argumentos, nombreFuncion, n.getLine());
-                    ResolvedType rtRetorno = resolverTipoDeclarado(f.tipoRetorno, n.getLine());
+                    ResolvedType rtRetorno = resolverTipoDeclarado(f.tipoRetornoBase(), n.getLine());
                     tipoActual = rtRetorno.tipo();
                     tipoUsuarioActual = rtRetorno.tipoUsuario();
 
@@ -1224,7 +1272,7 @@ public class SemanticAnalyzer implements ASTVisitor<Type> {
                     verificarAcceso("método", metodo.nombre, metodo.claseDuena, metodo.visibilidad, n);
                     validarParametros(metodo.parametros, call.argumentos,
                             claseActual + "." + nombreMetodoImplicito, n.getLine());
-                    ResolvedType rtRetorno = resolverTipoDeclarado(metodo.tipoRetorno, n.getLine());
+                    ResolvedType rtRetorno = resolverTipoDeclarado(metodo.tipoRetornoBase(), n.getLine());
                     tipoActual = rtRetorno.tipo();
                     tipoUsuarioActual = rtRetorno.tipoUsuario();
 
