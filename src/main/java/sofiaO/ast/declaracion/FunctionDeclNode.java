@@ -32,6 +32,16 @@ public class FunctionDeclNode extends BaseNode implements Declaration {
         this.claseDuena = claseDuena;
     }
 
+    /** Tipo de retorno sin los corchetes: "int[][]" -> "int". Un retorno de arreglo devuelve el puntero al arreglo. */
+    public String tipoRetornoBase() {
+        return tipoRetorno == null ? null : tipoRetorno.replace("[]", "").trim();
+    }
+
+    /** true si el método devuelve un arreglo (int[], String[], int[][]...). */
+    public boolean retornaArreglo() {
+        return tipoRetorno != null && tipoRetorno.contains("[]");
+    }
+
     /**
      * Nombre del método en el código generado. Distingue las sobrecargas y hace que un @Override
      * (misma firma en la clase hija) tenga el mismo nombre que el método del padre:

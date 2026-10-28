@@ -46,6 +46,12 @@ public class ArithmeticEmitter implements RvInstructionEmitter {
         }
         f.cargarPalabra(q.arg1, "t0");
         f.cargarPalabra(q.arg2, "t1");
+        if ((op.equals("==") || op.equals("!=")) && f.tipoVal(q.arg1) == Type.CADENA && f.tipoVal(q.arg2) == Type.CADENA) {
+            sofiaO.Traductor.riscv.RiscVInline.compararCadenas(f);   // contenido, no direccion
+            if (op.equals("!=")) f.ins("xori t2, t2, 1");
+            f.guardarPalabraEn(q.result, "t2");
+            return;
+        }
         switch (op) {
             case "+" -> f.ins("add t2, t0, t1");
             case "-" -> f.ins("sub t2, t0, t1");
