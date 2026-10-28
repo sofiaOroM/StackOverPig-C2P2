@@ -118,7 +118,7 @@ listaValores
 
 // x += 3;  x -= 2;  x *= 2;  mi_entero = 23;
 asignacion
-    : acceso op=('='|'+='|'-='|'*=') expresion ';'
+    : acceso op=('='|'+='|'-='|'*='|'/='|'%=') expresion ';'
     ;
 
 // a++;  b--;
@@ -168,7 +168,7 @@ forInit
 
 forUpdate
     : acceso ('++'|'--')       # forUpdateIncremento
-    | acceso '=' expresion     # forUpdateAsignacion
+    | acceso op=('='|'+='|'-='|'*='|'/='|'%=') expresion     # forUpdateAsignacion
     ;
 
 // while (contador < 3) {...}
@@ -319,6 +319,8 @@ MENOSMENOS : '--';
 MASIGUAL   : '+=';
 MENOSIGUAL : '-=';
 PORIGUAL   : '*=';
+DIVIGUAL   : '/=';
+MODIGUAL   : '%=';
 ASIGNAR    : '=';
 MAS   : '+';
 MENOS : '-';

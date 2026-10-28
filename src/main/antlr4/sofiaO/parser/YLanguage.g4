@@ -107,7 +107,7 @@ listaValores
 // alumno1.nombre = "Yennifer"
 // p3 = p1
 asignacion
-    : acceso '=' expresion
+    : acceso op=('='|'+='|'-='|'*='|'/=') expresion
     ;
 
 // acceso a variable simple, campo de estructura o índice de arreglo
@@ -207,6 +207,7 @@ argumentos
 expresion
     : '(' expresion ')'                            # exprParentesis
     | '!' expresion                                 # exprNegacion
+    | '-' expresion                                 # exprNegativo
     | acceso                                        # exprAcceso
     | llamadaFuncion                                # exprLlamadaFuncion
     | entrada                                       # exprEntrada
@@ -300,6 +301,10 @@ NOT : '!';
 MASMAS     : '++';
 MENOSMENOS : '--';
 // Asignación
+MASIGUAL   : '+=';
+MENOSIGUAL : '-=';
+PORIGUAL   : '*=';
+DIVIGUAL   : '/=';
 ASIGNAR : '=';
 
 // ---- Identificadores y literales ----

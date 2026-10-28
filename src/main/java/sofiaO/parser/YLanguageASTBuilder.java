@@ -231,7 +231,7 @@ public class YLanguageASTBuilder extends YLanguageBaseVisitor<ASTNode> {
     public ASTNode visitAsignacion(YLanguageParser.AsignacionContext ctx) {
         Expression destino = (Expression) visit(ctx.acceso());
         Expression valor = (Expression) visit(ctx.expresion());
-        return new AssignNode(destino, "=", valor,
+        return new AssignNode(destino, ctx.op.getText(), valor,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
 
@@ -460,6 +460,14 @@ public class YLanguageASTBuilder extends YLanguageBaseVisitor<ASTNode> {
     public ASTNode visitExprNegacion(YLanguageParser.ExprNegacionContext ctx) {
         Expression operando = (Expression) visit(ctx.expresion());
         return new UnaryExprNode("!", operando,
+                ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
+    }
+
+    /** -x : menos unario (retornar -5, retornar -n). */
+    @Override
+    public ASTNode visitExprNegativo(YLanguageParser.ExprNegativoContext ctx) {
+        Expression operando = (Expression) visit(ctx.expresion());
+        return new UnaryExprNode("-", operando,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
 

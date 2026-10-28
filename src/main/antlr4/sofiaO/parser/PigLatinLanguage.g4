@@ -124,7 +124,7 @@ tipo
 // nombres[0] = "Capitán Espárragos";
 // miObjeto.nombre = "Yennifer";
 asignacion
-    : acceso '=' expresion ';'
+    : acceso op=('='|'+='|'-='|'*='|'/=') expresion (':' tipo)? ';'   // reserva = novus Guerrero(...) : Unidad;
     ;
 
 acceso
@@ -147,7 +147,8 @@ llamada
     ;
 
 incrementoDecremento
-    : ID ('++'|'--') ';'
+    : ID op=('++'|'--') ';'       // g++;
+    | op=('++'|'--') ID ';'       // ++g;
     ;
 
 // ---------------- Entrada/Salida ----------------
@@ -198,7 +199,8 @@ forInit
 
 forUpdate
     : ID ('++'|'--')
-    | acceso '=' expresion
+    | ('++'|'--') ID
+    | acceso ('='|'+='|'-='|'*='|'/=') expresion
     ;
 
 
@@ -272,6 +274,10 @@ AND : '&&';
 OR  : '||';
 MASMAS     : '++';
 MENOSMENOS : '--';
+MASIGUAL   : '+=';
+MENOSIGUAL : '-=';
+PORIGUAL   : '*=';
+DIVIGUAL   : '/=';
 ASIGNAR : '=';
 MAS   : '+';
 MENOS : '-';

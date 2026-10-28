@@ -177,13 +177,13 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
     public ASTNode visitAsignacion(PigLatinLanguageParser.AsignacionContext ctx) {
         Expression destino = (Expression) visit(ctx.acceso());
         Expression valor = (Expression) visit(ctx.expresion());
-        return new AssignNode(destino, "=", valor,
+        return new AssignNode(destino, ctx.op.getText(), valor,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
 
     @Override
     public ASTNode visitIncrementoDecremento(PigLatinLanguageParser.IncrementoDecrementoContext ctx) {
-        String operador = ctx.getChild(1).getText();
+        String operador = ctx.op.getText();   // g++  o  ++g
         return new IncrDecrNode(ctx.ID().getText(), operador,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
@@ -330,10 +330,12 @@ public class PigLatinASTBuilder extends PigLatinLanguageBaseVisitor<ASTNode> {
         if (ctx.acceso() != null) {
             Expression destino = (Expression) visit(ctx.acceso());
             Expression valor = (Expression) visit(ctx.expresion());
-            return new AssignNode(destino, "=", valor,
+            return new AssignNode(destino, ctx.getChild(1).getText(), valor,
                     ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
         }
-        String operador = ctx.getChild(1).getText();
+        // g++  o  ++g
+        String operador = ctx.getChild(0) instanceof org.antlr.v4.runtime.tree.TerminalNode t0
+                && (t0.getText().equals("++") || t0.getText().equals("--")) ? t0.getText() : ctx.getChild(1).getText();
         return new IncrDecrNode(ctx.ID().getText(), operador,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }

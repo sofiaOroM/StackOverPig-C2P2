@@ -392,7 +392,7 @@ public class ZetarianoASTBuilder extends ZetarianoLanguageBaseVisitor<ASTNode> {
     public ASTNode visitForUpdateAsignacion(ZetarianoLanguageParser.ForUpdateAsignacionContext ctx) {
         Expression destino = (Expression) visit(ctx.acceso());
         Expression valor = (Expression) visit(ctx.expresion());
-        return new AssignNode(destino, "=", valor,
+        return new AssignNode(destino, ctx.op.getText(), valor,
                 ctx.getStart().getLine(), ctx.getStart().getCharPositionInLine());
     }
 
