@@ -108,13 +108,16 @@ public class RiscVEmitter {
         StringBuilder salida = new StringBuilder();
         salida.append("# ==========================================================================\n");
         salida.append("# Código RISC-V (RV32IMFD) generado por Extraterrestre3D - Proyecto 2\n");
-        salida.append("# Para RARS. Pila: un marco por función (s0 = fp, ra en -4(s0)). Heap: sbrk (ecall 9). Sin funciones auxiliares.\n");
+        salida.append("# Para RARS. Memoria MANUAL: pila y heap son bloques estáticos de .data con control de desborde (sin sbrk ni pila del sistema). Un marco por función (s0 = fp, ra en -4(s0)). Sin funciones auxiliares.\n");
         salida.append("# ==========================================================================\n");
         salida.append(".data\n");
         salida.append("str_null:   .asciz \"null\"\n");
         salida.append("str_true:   .asciz \"true\"\n");
         salida.append("str_false:  .asciz \"false\"\n");
         salida.append("str_nullerr: .asciz \"Error: referencia nula (NullPointerException)\\n\"\n");
+        salida.append("str_heaperr: .asciz \"Error: memoria agotada (el heap estatico se lleno)\\n\"\n");
+        salida.append("str_negerr: .asciz \"Error: tamano de arreglo negativo\\n\"\n");
+        salida.append("str_stackerr: .asciz \"Error: desbordamiento de pila (recursion demasiado profunda)\\n\"\n");
         for (Map.Entry<String, String> e : ctx.cadenas.entrySet()) {
             salida.append(e.getValue()).append(": .asciz \"").append(e.getKey()).append("\"\n");
         }
@@ -133,6 +136,20 @@ public class RiscVEmitter {
             }
             salida.append("\n");
         }
+        // Memoria estática: un bloque para el heap (puntero que solo avanza) y el límite de la pila.
+        salida.append(".align 3\n");
+        salida.append("heap_ptr: .word heap_mem\n");
+        salida.append("stack_lim: .word 0\n");
+        salida.append(".align 3\n");
+        salida.append("heap_mem: .space ").append(sofiaO.Traductor.riscv.RiscVInline.TAM_HEAP).append("\n");
+        salida.append("heap_fin:\n");
+        salida.append(".align 4\n");
+        salida.append("stack_mem: .space ").append(sofiaO.Traductor.riscv.RiscVInline.TAM_PILA).append("\n");
+        salida.append("stack_fin:\n");
+        // Las rutinas de error se escriben UNA vez (no son funciones del programa: solo avisan y terminan).
+        texto.append("error_heap:\n    la a0, str_heaperr\n    li a7, 4\n    ecall\n    li a7, 10\n    ecall\n\n");
+        texto.append("error_negativo:\n    la a0, str_negerr\n    li a7, 4\n    ecall\n    li a7, 10\n    ecall\n\n");
+        texto.append("error_pila:\n    la a0, str_stackerr\n    li a7, 4\n    ecall\n    li a7, 10\n    ecall\n\n");
         salida.append("\n").append(texto);
 
         reporteMemoria = "=== PILA: marcos de cada función ===\n" + ctx.reportePila + "\n" + layouts.reporte();

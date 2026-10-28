@@ -25,14 +25,34 @@ public final class RiscVInline {
         }
     }
 
+    /** Tamaño del heap estático (bloque reservado en .data). Se reparte con un puntero que solo avanza. */
+    public static final int TAM_HEAP = 1 << 20;     // 1 MiB
+    /** Máximo de pila que se permite usar al programa antes de avisar de un desbordamiento. */
+    public static final int TAM_PILA = 1 << 18;     // 256 KiB
+
     // ------------------------------------------------------------------
-    // HEAP: a0 = bytes  ->  a0 = dirección (alineada a 8). sbrk = ecall 9
+    // HEAP ESTÁTICO (sin memoria dinámica del sistema: nada de sbrk / ecall 9).
+    //   a0 = bytes  ->  a0 = dirección (alineada a 8) dentro del bloque heap_mem.
+    //   heap_ptr guarda el siguiente byte libre. Si lo pedido no cabe (o el tamaño es absurdo/negativo)
+    //   el programa se detiene con un mensaje en lugar de pisar otra zona de memoria.
+    //   Usa solo t4, t5, t6 y a0.
     // ------------------------------------------------------------------
     public static void alloc(FrameContext f) {
         f.ins("addi a0, a0, 7");
         f.ins("andi a0, a0, -8");
-        f.ins("li a7, 9");
-        f.ins("ecall                       # sbrk: reserva en el heap");
+        emitir(f, """
+            la t6, heap_ptr
+            lw t5, 0(t6)
+            add t4, t5, a0
+            bltu t4, t5, hov@
+            la a0, heap_fin
+            bleu t4, a0, hok@
+            hov@:
+            j error_heap
+            hok@:
+            sw t4, 0(t6)
+            mv a0, t5
+            """);
     }
 
     // ------------------------------------------------------------------
@@ -159,10 +179,9 @@ public final class RiscVInline {
             lbe@:
             add a0, s3, s4
             addi a0, a0, 1
-            addi a0, a0, 7
-            andi a0, a0, -8
-            li a7, 9
-            ecall
+            """);
+        alloc(f);                                  // a0 = bloque nuevo (heap estático, con control de desborde)
+        emitir(f, """
             mv s3, a0
             mv t3, a0
             mv t0, s1
@@ -334,6 +353,29 @@ public final class RiscVInline {
     // ------------------------------------------------------------------
     // Leer una línea (ecall 8) y quitarle el salto de línea  ->  a0 = cadena nueva
     // ------------------------------------------------------------------
+    /** Compara el CONTENIDO de dos cadenas (punteros en t0 y t1). Deja en t2 1 si son iguales, 0 si no. null solo iguala a null. */
+    public static void compararCadenas(FrameContext f) {
+        emitir(f, """
+            beq t0, t1, ig@
+            beqz t0, di@
+            beqz t1, di@
+            lp@:
+            lbu t3, 0(t0)
+            lbu t4, 0(t1)
+            bne t3, t4, di@
+            beqz t3, ig@
+            addi t0, t0, 1
+            addi t1, t1, 1
+            j lp@
+            ig@:
+            li t2, 1
+            j fn@
+            di@:
+            li t2, 0
+            fn@:
+            """);
+    }
+
     public static void leerCadena(FrameContext f) {
         f.ins("li a0, 256");
         alloc(f);

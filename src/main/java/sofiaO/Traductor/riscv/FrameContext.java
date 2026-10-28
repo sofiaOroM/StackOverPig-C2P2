@@ -158,13 +158,25 @@ public class FrameContext {
         out.append("#   0(s0) = fp anterior    -4(s0) = ra    desde -8(s0): variables, parámetros y temporales\n");
         for (String m : mapaMarco) out.append("#   ").append(m).append("\n");
         out.append(lblFunc(funcActual)).append(":\n");
-        if (esMain) out.append("    andi sp, sp, -16           # pila alineada a 16 bytes (los double necesitan alineación)\n");
+        if (esMain) {
+            // PILA MANUAL: el programa no usa la pila del sistema. sp se coloca al final del bloque estático
+            // stack_mem (reservado en .data) y el límite de pila es su comienzo.
+            out.append("    la   sp, stack_fin         # pila propia (bloque estático): sp apunta a su tope\n");
+            out.append("    la   t6, stack_mem\n    addi t6, t6, 256          # margen de seguridad\n");
+            out.append("    la   t5, stack_lim\n    sw   t6, 0(t5)            # límite de la pila\n");
+            out.append("    andi sp, sp, -16           # pila alineada a 16 bytes (los double necesitan alineación)\n");
+        }
+        // reservar el marco y COMPROBAR el límite antes de escribir nada en él
+        String okPila = "pila_ok_" + lblFunc(funcActual);
+        if (marco <= 2047) out.append("    addi sp, sp, -").append(marco).append("            # reserva el marco\n");
+        else out.append("    li   t6, ").append(marco).append("\n    sub  sp, sp, t6            # reserva el marco\n");
+        out.append("    la   t6, stack_lim\n    lw   t6, 0(t6)\n    bgeu sp, t6, ").append(okPila)
+           .append("            # control de desbordamiento de pila\n    j    error_pila\n").append(okPila).append(":\n");
         if (marco <= 2047) {
-            out.append("    addi sp, sp, -").append(marco).append("            # reserva el marco\n");
             out.append("    sw   s0, ").append(marco - 8).append("(sp)            # guarda el fp anterior\n");
             out.append("    addi s0, sp, ").append(marco - 8).append("            # s0 = fp de esta función\n");
         } else {
-            out.append("    li   t6, ").append(marco).append("\n    sub  sp, sp, t6            # reserva el marco\n");
+            out.append("    li   t6, ").append(marco).append("\n");
             out.append("    add  t5, sp, t6\n    sw   s0, -8(t5)            # guarda el fp anterior\n");
             out.append("    addi s0, t5, -8            # s0 = fp de esta función\n");
         }

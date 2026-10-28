@@ -44,6 +44,14 @@ public class ArrayEmitter implements RvInstructionEmitter {
         // Encabezado de 32 bytes ANTES de los datos (el puntero apunta a los datos):
         //   -4 rank | -8 total | -12 d0 | -16 d1 | -20 d2      (los tamaños pueden conocerse solo al ejecutar)
         List<String> dims = q.extraArgs.isEmpty() ? List.of(q.arg1) : q.extraArgs;
+        // un tamaño negativo no es válido: se avisa en lugar de reservar memoria con un tamaño absurdo
+        for (String d : dims) {
+            f.cargarPalabra(d, "t1");
+            String ok = f.nuevaAux();
+            f.ins("bgez t1, " + ok);
+            f.ins("j error_negativo");
+            f.etiqueta(ok);
+        }
         f.cargarPalabra(q.arg1, "t0");
         f.ins("li t1, " + size);
         f.ins("mul a0, t0, t1");
